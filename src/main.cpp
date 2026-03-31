@@ -38,7 +38,7 @@ void IRAM_ATTR isrButtonA() {
 Preferences preferences;
 
 // Charging Algorithm Globals - Simplified
-// Modes: 0=SOLAR, 1=BALANCEO, 2=TURBO
+// Modes: 0=SOLAR, 1=BALANCEO, 2=TURBO, 3=OFF
 int charging_mode = 0;                       // Default: 0 (SOLAR)
 int max_grid_power = DEFAULT_MAX_GRID_POWER; // Default from config
 float max_price_threshold = PRICE_THRESHOLD; // Info only
@@ -187,7 +187,7 @@ void setup() {
   lastLogicRun = millis() - logicInterval;
 
   extern void sendTelegramNotification(String msg);
-  String modeStr = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANCEO" : "TURBO";
+  String modeStr = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANCEO" : (charging_mode == 2) ? "TURBO" : "OFF";
   sendTelegramNotification("🚀 Sistema Iniciado. Modo actual: " + modeStr);
 }
 
@@ -205,9 +205,33 @@ void runSmartChargingLogic() {
 
   BenyData bd = getBenyData();
 
-  // 1. CHECK STATUS: Only run logic if currently CHARGING (or if we are handling an auto-pause constraint)
-  if (bd.status != "CHARGING" && !auto_paused) {
-    // If NOT charging and NOT auto-paused, user explicitly stopped.
+  // 1. CHECK STATUS:
+  if (bd.status == "DISCONNECTED" || bd.status == "UNPLUGGED") {
+    auto_paused = false; // Reset pause if unplugged
+    return;
+  }
+
+  if (charging_mode == 3) { // Mode 3: OFF
+    if (bd.status == "CHARGING" || bd.status == "STARTING") {
+      benyStopCharge();
+      Serial.println("Manual: Deteniendo carga (Modo OFF).");
+    }
+    return;
+  }
+
+  // 2. AUTO-START: If waiting/standby and NOT paused, tell it to start
+  if (!auto_paused && (bd.status == "WAITING" || bd.status == "STANDBY")) {
+    static unsigned long lastStartAttempt = 0;
+    if (millis() - lastStartAttempt > 5000) { // Don't spam start commands
+      lastStartAttempt = millis();
+      benyStartCharge();
+      Serial.println("Auto-Start: El cargador estaba en espera. Enviando orden de inicio.");
+    }
+    return; // Wait for it to change status to CHARGING
+  }
+
+  if (bd.status != "CHARGING" && bd.status != "STARTING" && !auto_paused) {
+    // If not charging/starting and not auto-paused, and we didn't hit the auto-start above
     return;
   }
 
@@ -386,15 +410,18 @@ void drawStatusScreen(bool fullClear) {
   M5.Lcd.printf("Beny: %.3fkW\n", bd.power / 1000.0);
 
   // Line 2: Mode
-  if (charging_mode == 2) {
-    M5.Lcd.setTextColor(RED, BLACK);
-    M5.Lcd.printf("Mode: TURBO   \n");
+  if (charging_mode == 0) {
+    M5.Lcd.setTextColor(GREEN, BLACK);
+    M5.Lcd.printf("Mode: SOLAR   \n");
   } else if (charging_mode == 1) {
     M5.Lcd.setTextColor(ORANGE, BLACK);
     M5.Lcd.printf("Mode: BALANCEO\n");
+  } else if (charging_mode == 2) {
+    M5.Lcd.setTextColor(RED, BLACK);
+    M5.Lcd.printf("Mode: TURBO   \n");
   } else {
-    M5.Lcd.setTextColor(GREEN, BLACK);
-    M5.Lcd.printf("Mode: SOLAR   \n");
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.printf("Mode: OFF     \n");
   }
 
   // Auto-pause warning
@@ -459,13 +486,13 @@ void loop() {
     wakeScreen(); // Always wake
 
     if (wasAwake) { // Only change mode if screen was already on
-      charging_mode = (charging_mode + 1) % 3;
+      charging_mode = (charging_mode + 1) % 4; // Now 4 modes (0,1,2,3)
       saveMode(charging_mode);
       manual_logic_trigger = true;
       Serial.printf("Button A Pressed: Mode set to %d\n", charging_mode);
       
       extern void sendTelegramNotification(String msg);
-      String modeStr = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANCEO" : "TURBO";
+      String modeStr = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANCEO" : (charging_mode == 2) ? "TURBO" : "OFF";
       sendTelegramNotification("🔘 M5Stick Botón: Modo cambiado a " + modeStr);
     }
   }

@@ -27,9 +27,10 @@ El objetivo principal es maximizar el autoconsumo solar, proteger la instalació
 
 | Modo | ID | Descripción | Autoapagado |
 |------|----|-------------|-------------|
-| ☀️ **Solar** | 0 | Solo carga con excedentes solares. Objetivo: 0W de importación de red. | ✅ Si importa >690W durante el tiempo de pausa. |
-| ⚖️ **Balanceo** | 1 | Carga dinámica limitando la importación de red al máximo configurado (`DEFAULT_MAX_GRID_POWER`). | ✅ Si supera el límite de red durante el tiempo de pausa. |
-| 🚀 **Turbo** | 2 | Carga a máxima potencia ignorando todas las restricciones de red. | ❌ Desactivado. |
+| ☀️ **Solar** | 0 | Solo carga con excedentes solares. Objetivo: 0W de red. | ✅ Activo |
+| ⚖️ **Balanceo** | 1 | Carga dinámica limitada por la potencia contratada. | ✅ Activo |
+| 🚀 **Turbo** | 2 | Carga a máxima potencia (28A) sin restricciones. | ❌ Desactivado |
+| 🌑 **OFF** | 3 | Cargador desactivado manualmente. | - |
 
 **Modo por defecto:** Solar (ID 0).
 
@@ -73,6 +74,7 @@ Para evitar oscilaciones bruscas del amperaje de carga provocadas por picos dom�
 | `/solar` | Activa el modo Solar (solo excedentes). |
 | `/balanceo` | Activa el modo Balanceo Dinámico. |
 | `/turbo` | Activa el modo Turbo (sin autoapagado). |
+| `/off` / `/stop` | Desactiva el cargador completamente. |
 
 ### Configuración
 | Comando | Descripción | Rango | Defecto |

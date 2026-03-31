@@ -64,6 +64,7 @@ void handleNewMessages(int numNewMessages) {
       welcome += "/solar - Modo Solar (Solo excedentes)\n";
       welcome += "/balanceo - Modo Balanceo (Hasta max red)\n";
       welcome += "/turbo - Modo Turbo (Sin autoapagado)\n";
+      welcome += "/off - Desactivar cargador (Manual STOP)\n";
       bot.sendMessage(chat_id, welcome, "");
     } else if (text == "/help") {
       String help = "Comandos:\n";
@@ -76,6 +77,7 @@ void handleNewMessages(int numNewMessages) {
       help += "/solar - Modo Solar (Solo excedentes)\n";
       help += "/balanceo - Modo Balanceo (Hasta max red)\n";
       help += "/turbo - Modo Turbo (Sin autoapagado)\n";
+      help += "/off - Desactivar cargador (Manual STOP)\n";
       bot.sendMessage(chat_id, help, "");
     } else if (text == "/status") {
       String msg = "📊 *ESTADO DEL SISTEMA* 📊\n\n";
@@ -103,6 +105,9 @@ void handleNewMessages(int numNewMessages) {
       } else if (charging_mode == 2) {
         msg += "TURBO\n";
         msg += "   _Ignora Autoapagado (Max Red " + String(max_grid_power) + "W)_";
+      } else {
+        msg += "OFF\n";
+        msg += "   _Cargador Desactivado_";
       }
       msg += "\n";
       
@@ -181,6 +186,11 @@ void handleNewMessages(int numNewMessages) {
       manual_logic_trigger = true;
       bot.sendMessage(
           chat_id, "Modo: BALANCEO (Lim Red " + String(max_grid_power) + "W).", "");
+    } else if (text == "/off" || text == "/stop") {
+      charging_mode = 3;
+      saveMode(charging_mode);
+      manual_logic_trigger = true;
+      bot.sendMessage(chat_id, "Modo: OFF. Cargador desactivado.", "");
     }
   }
 }

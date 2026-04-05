@@ -27,10 +27,9 @@ El objetivo principal es maximizar el autoconsumo solar, proteger la instalació
 
 | Modo | ID | Descripción | Autoapagado |
 |------|----|-------------|-------------|
-| ☀️ **Solar** | 0 | Solo carga con excedentes solares. Objetivo: 0W de red. | ✅ Activo |
-| ⚖️ **Balanceo** | 1 | Carga dinámica limitada por la potencia contratada. | ✅ Activo |
-| 🚀 **Turbo** | 2 | Carga a máxima potencia (28A) sin restricciones. | ❌ Desactivado |
-| 🌑 **OFF** | 3 | Cargador desactivado manualmente. | - |
+| ☀️ **Solar** | 0 | Carga con excedentes (min 6A consumiendo de red si falta sol). | ✅ Activo (max 4.6kW) |
+| ⚖️ **Balanceo** | 1 | Carga dinámica rápida aprovechando hasta la potencia contratada. | ✅ Activo (max 4.6kW) |
+| 🌑 **OFF** | 2 | Cargador desactivado manualmente. | - |
 
 **Modo por defecto:** Solar (ID 0).
 
@@ -38,17 +37,16 @@ El objetivo principal es maximizar el autoconsumo solar, proteger la instalació
 
 Para proteger la instalación eléctrica, el sistema implementa un mecanismo automático de pausa y reanudación de la carga (activo en los modos Solar y Balanceo):
 
-- **Autoapagado**: Si se excede el límite de red durante un tiempo configurable (por defecto 60s), se detiene la carga.
+- **Autoapagado**: Si se excede el límite de red durante un tiempo configurable (por defecto 60s), se detiene la carga impidiendo que salte el ICP.
 - **Autoreinicio**: Si hay un margen de potencia disponible (por defecto 1840W / 8A) durante un tiempo configurable (por defecto 60s), se reanuda la carga.
-- **Turbo**: Ignora por completo la lógica de autoapagado. Si se activa el modo Turbo mientras la carga está pausada, se fuerza el reinicio inmediato.
 
 Todos los parámetros de tiempo y margen son configurables remotamente por Telegram y se persisten en la memoria flash del M5Stick.
 
-## Filtro de Media Móvil (Anti-Picos)
+## Control Dinámico por Pasos e Histéresis (DLB)
 
-Para evitar oscilaciones bruscas del amperaje de carga provocadas por picos domésticos transitorios (microondas, secadora, etc.), el cálculo de los amperios del DLB utiliza la **media de las últimas 5 lecturas** (~10 segundos).
+Para evitar oscilaciones bruscas del amperaje y proteger los contactores del cargador, el algoritmo DLB ajusta la corriente de carga a razón de **±1 Amperio por segundo**. 
 
-> **Nota:** La lógica de autoapagado de seguridad sigue utilizando el valor instantáneo para reaccionar rápidamente ante excesos reales.
+Además, implementa un margen de **histéresis (zona muerta) de 200W** en torno al objetivo. Si la lectura de la red varía menos de 200W respecto a la meta, el cargador asimila ese pequeño margen temporal sin emitir órdenes continuas de ajuste.
 
 ## Gestión de Pantalla (Salvapantallas)
 
@@ -71,9 +69,8 @@ Para evitar oscilaciones bruscas del amperaje de carga provocadas por picos dom�
 ### Modos de Carga
 | Comando | Descripción |
 |---------|-------------|
-| `/solar` | Activa el modo Solar (solo excedentes). |
-| `/balanceo` | Activa el modo Balanceo Dinámico. |
-| `/turbo` | Activa el modo Turbo (sin autoapagado). |
+| `/solar` | Activa el modo Solar (Solo excedentes, min 6A). |
+| `/balanceo` | Activa el modo Balanceo Dinámico (Límite Red). |
 | `/off` / `/stop` | Desactiva el cargador completamente. |
 
 ### Configuración
@@ -81,9 +78,9 @@ Para evitar oscilaciones bruscas del amperaje de carga provocadas por picos dom�
 |---------|-------------|-------|---------|
 | `/set_limit <watts>` | Límite máximo de importación de red (W). | 1000 – 10000 | 4600 |
 | `/set_pausa <segundos>` | Tiempo de tolerancia antes del autoapagado. | 10 – 3600 | 60 |
-| `/set_reinicio <segundos>` | Tiempo de espera con energía disponible para reiniciar. | 10 – 3600 | 60 |
-| `/set_margen <vatios>` | Margen de potencia disponible necesario para reiniciar. | 100 – 8000 | 1840 |
-| `/set_price <valor>` | Umbral de precio eléctrico (solo informativo en pantalla). | > 0 | 0.05 |
+| `/set_reinicio <segundos>` | Tiempo de espera para autoreinicio. | 10 – 3600 | 60 |
+| `/set_margen <vatios>` | Margen de potencia disp. necesario para reiniciar. | 100 – 8000 | 1840 |
+| `/set_price <valor>` | Umbral de precio eléctrico (solo informativo). | > 0 | 0.05 |
 
 ### Notificaciones Automáticas
 El sistema envía mensajes proactivos a Telegram cuando:
@@ -117,7 +114,7 @@ CargadorBenyV2/
 |-------|----------|-------------|
 | Huawei (Modbus) | 1s | Lectura de potencia de red y solar. |
 | Beny (UDP) | 2s | Lectura de estado del cargador. |
-| Lógica DLB | 2s | Cálculo y ajuste de amperaje. |
+| Lógica DLB | 1s | Cálculo y ajuste de amperaje continuo (±1A). |
 | Telegram | 2s | Polling de mensajes entrantes. |
 | Pantalla LCD | 500ms | Refresco de la interfaz visual. |
 | Google Sheets | 10s (check) / 1h (envío) | Envío de datos cada hora en punto. |
@@ -134,7 +131,7 @@ Cada hora en punto, el sistema envía un `GET` al Google Apps Script con los sig
 | `grid` | int | Potencia de red (W). Positivo = importando. |
 | `solar` | int | Producción solar (W). |
 | `price` | float | Precio PVPC actual (€/kWh). |
-| `mode` | int | Modo activo (0=Solar, 1=Balanceo, 2=Turbo). |
+| `mode` | int | Modo activo (0=Solar, 1=Balanceo, 2=OFF). |
 | `beny_w` | int | Potencia de carga del Beny (W). |
 | `paused` | int | 1 si está en pausa automática, 0 si no. |
 

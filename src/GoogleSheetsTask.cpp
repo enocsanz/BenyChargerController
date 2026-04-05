@@ -1,6 +1,7 @@
 #include "GoogleSheetsTask.h"
 #include "BenyTask.h"
 #include "config.h"
+#include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 

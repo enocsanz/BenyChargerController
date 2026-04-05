@@ -1,0 +1,13 @@
+.pio
+.vscode
+.git
+*.o
+*.a
+*.d
+*.bin
+*.elf
+*.hex
+src/config.h
+include/config.h
+*.txt
+lib/

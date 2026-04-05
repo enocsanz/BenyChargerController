@@ -1,6 +1,8 @@
 #include "BenyTask.h"
 #include "config.h"
 #include <Arduino.h>
+#include <WiFiUdp.h>
+#include <cstdio>  // For snprintf
 #include <cstring> // For memset
 
 WiFiUDP benyUdp;
@@ -11,18 +13,10 @@ const int benyPollInterval = 2000; // Poll every 2 seconds
 
 // Helper to convert int to Hex String (padded)
 String intToHex(int value, int digits) {
+  char fmt[10];
+  snprintf(fmt, sizeof(fmt), "%%0%dx", digits); // Create format string like "%05x"
   char buf[20];
-  memset(buf, 0, sizeof(buf));
-  if (digits == 2)
-    snprintf(buf, sizeof(buf), "%02x", value);
-  else if (digits == 4)
-    snprintf(buf, sizeof(buf), "%04x", value);
-  else if (digits == 5)
-    snprintf(buf, sizeof(buf), "%05x", value);
-  else if (digits == 8)
-    snprintf(buf, sizeof(buf), "%08x", value);
-  else
-    snprintf(buf, sizeof(buf), "%x", value);
+  snprintf(buf, sizeof(buf), fmt, value);
   return String(buf);
 }
 
@@ -37,10 +31,11 @@ uint8_t calculateChecksum(String msg) {
   return sum % 256;
 }
 
-// Build Packet: Header + ID + Content + Checksum
-// Based on python: 55aa (Header) ...
-String buildPacket(String prefix, String pinHex, String suffix) {
-  String packet = prefix + pinHex + suffix;
+// Build Packet matching official beny_wifi HA integration format:
+// "55aa1000" + type(2) + "000" + PIN(5hex) + suffix + checksum
+String buildBenyPacket(String typeHex, String suffix) {
+  String pinHex = intToHex(BENY_PIN, 5); // 5 hex chars. Supports 6-digit decimal PINs (up to 1,048,575)
+  String packet = "55aa1000" + typeHex + "000" + pinHex + suffix;
   uint8_t chk = calculateChecksum(packet);
   packet += intToHex(chk, 2);
   return packet;
@@ -48,7 +43,7 @@ String buildPacket(String prefix, String pinHex, String suffix) {
 
 void sendPacket(String packet) {
   if (PacketDebug)
-    Serial.printf("Beny: Sending %s\n", packet.c_str());
+    Serial.printf("Beny Tx [%d]: %s\n", packet.length(), packet.c_str());
   benyUdp.beginPacket(BENY_IP, BENY_PORT);
   benyUdp.print(packet); // Send as ASCII
 
@@ -66,17 +61,21 @@ void sendBroadcast(String packet) {
 }
 
 void benyPollDevices() {
-  String pinHex = intToHex(BENY_PIN, 5);
+  String pinHex = intToHex(BENY_PIN, 6);
   int serialInt = atoi(BENY_SERIAL);
   String serialHex = intToHex(serialInt, 8);
-  String packet = buildPacket("55aa03000f000", pinHex, "03" + serialHex);
+  // Poll uses a slightly different prefix format than Standard CMD
+  // 55aa03000f000 + (truncated pin) + 03 + serialHex
+  String packet = "55aa03000f000" + pinHex.substring(1) + "03" + serialHex;
+  uint8_t chk = calculateChecksum(packet);
+  packet += intToHex(chk, 2);
   sendBroadcast(packet);
 }
 
 void setupBeny() {
   Serial.println("Beny: Initializing UDP...");
   Serial.printf("DEBUG: Configured PIN (Int): %d\n", BENY_PIN);
-  Serial.println("DEBUG: Configured PIN (Hex): " + intToHex(BENY_PIN, 5));
+  Serial.println("DEBUG: Configured PIN (Hex): " + intToHex(BENY_PIN, 6));
   benyUdp.begin(BENY_PORT);
 
   // Send a poll immediately on startup
@@ -99,10 +98,25 @@ void parseResponse(String response) {
   if (PacketDebug)
     Serial.printf("Beny: MsgType %d (0x%s)\n", msgType, msgTypeStr.c_str());
 
-  if (msgType == 8) { // 0x08
-    Serial.println("Beny: ACCESS DENIED! Check PIN.");
-    benyData.status = "ACCESS DENIED";
-    benyData.online = true;
+  if (msgType == 8) { // 0x08 - can be ACCESS DENIED or ACK to previous command
+    // Most commands (Start, Stop, Set Current) get a type-0x08 response as ACK.
+    // We only treat it as ACCESS DENIED if it's explicitly short or doesn't match expected patterns.
+    bool isAck = (response.length() >= 10); // Simple check for now: any type 8 of valid length is likely an ACK
+    
+    if (isAck) {
+      if (PacketDebug) {
+        String marker = (response.indexOf("6d") != -1) ? " (SET_CURRENT ACK)" : "";
+        Serial.printf("Beny: ACK Received%s. Raw: %s\n", marker.c_str(), response.c_str());
+      }
+      // If we were in ACCESS DENIED state, clear it since we got a valid response
+      if (benyData.status == "ACCESS DENIED") {
+          benyData.status = "CONNECTED";
+      }
+    } else {
+      Serial.printf("Beny: ACCESS DENIED or Malformed! Raw: %s\n", response.c_str());
+      benyData.status = "ACCESS DENIED";
+      benyData.online = true;
+    }
   }
 
   // Python: SERVER_MESSAGE.SEND_VALUES_1P = 0x1E (30)
@@ -181,38 +195,46 @@ void parseResponse(String response) {
 }
 
 void requestData() {
-  String pinHex = intToHex(BENY_PIN, 5);
-  String packet = buildPacket("55aa10000b000", pinHex, "70");
+  String packet = buildBenyPacket("0b", "70");
   sendPacket(packet);
 }
 
 void benyStartCharge() {
-  String pinHex = intToHex(BENY_PIN, 5);
-  String packet = buildPacket("55aa10000c000", pinHex, "0601");
+  // Official: "55aa10000c000[pin]06[command][checksum]"
+  // command = 01 (start), 00 (stop). The 06 byte is required.
+  String packet = buildBenyPacket("0c", "0601");
+  Serial.println("Beny: Sending START command...");
   sendPacket(packet);
 }
 
 void benyStopCharge() {
-  String pinHex = intToHex(BENY_PIN, 5);
-  String packet = buildPacket("55aa10000c000", pinHex, "0600");
+  // Official: "55aa10000c000[pin]06[command][checksum]"
+  String packet = buildBenyPacket("0c", "0600");
+  Serial.println("Beny: Sending STOP command...");
   sendPacket(packet);
 }
 
 void benySetCurrent(int amps) {
-  // SET_VALUES (0x6d)
-  // hex: 55aa10000d000[pin]6d00[max_amps][checksum]
-  // max_amps: 2 hex chars (1 byte)
-  if (amps < BENY_MIN_AMPS)
-    amps = BENY_MIN_AMPS;
-  if (amps > BENY_MAX_AMPS)
-    amps = BENY_MAX_AMPS;
+  // Official format from beny_wifi HA integration (const.py):
+  // "55aa10000d000[pin]6d00[max_current][checksum]"
+  if (amps < BENY_MIN_AMPS) amps = BENY_MIN_AMPS;
+  if (amps > BENY_MAX_AMPS) amps = BENY_MAX_AMPS;
 
-  String pinHex = intToHex(BENY_PIN, 5);
+  // Allow retry if physical current is significantly different from target
+  static int lastSentAmps = -1;
+  static unsigned long lastSentTime = 0;
+  bool syncNeeded = (abs(benyData.current - amps) > 2);
+  
+  if (amps == lastSentAmps && !syncNeeded && (millis() - lastSentTime < 30000)) {
+    return; // Truly same and synced, or sent very recently
+  }
+
+  lastSentAmps = amps;
+  lastSentTime = millis();
   String ampsHex = intToHex(amps, 2);
-
-  // Prefix: 55aa10000d000
-  // Suffix: 6d00 + ampsHex
-  String packet = buildPacket("55aa10000d000", pinHex, "6d00" + ampsHex);
+  // "6d00" is required before amps per official protocol
+  String packet = buildBenyPacket("0d", "6d00" + ampsHex);
+  Serial.printf("Beny SET_CURRENT: %dA -> Tx packet: %s\n", amps, packet.c_str());
   sendPacket(packet);
 }
 
@@ -243,8 +265,8 @@ void loopBeny() {
   static unsigned long lastDebug = 0;
   if (millis() - lastDebug > 10000) {
     lastDebug = millis();
-    Serial.printf("DEBUG LOOP: PIN %d, Hex %s\n", BENY_PIN,
-                  intToHex(BENY_PIN, 5).c_str());
+    Serial.printf("DEBUG LOOP: PIN %d, Hex %s, Status: %s\n", BENY_PIN,
+                  intToHex(BENY_PIN, 6).c_str(), benyData.status.c_str());
   }
 }
 

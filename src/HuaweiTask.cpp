@@ -1,7 +1,7 @@
 #include "HuaweiTask.h"
 #include "config.h"
 #include <Arduino.h>
-#include <HTTPClient.h>
+#include <WiFi.h>
 
 // --- Configuration & Constants ---
 // Using emelianov/modbus-esp8266
@@ -77,11 +77,6 @@ bool cbReadPower(Modbus::ResultCode event, uint16_t transactionId, void *data) {
       } else {
         current_grid_power = raw;
       }
-
-#ifdef DEBUG_HUAWEI
-      Serial.printf("Huawei: Grid Raw %d -> %d W (Lat: %lums)\n", raw,
-                    current_grid_power, latency);
-#endif
     } else { // PV
       current_pv_power = raw;
 #ifdef DEBUG_HUAWEI
@@ -137,8 +132,16 @@ void changeState(HuaweiState newState) {
 
 // --- Main Loop ---
 void loopHuawei() {
+  // Silence debug heartbeat for production
+  /*
+  static unsigned long lastHeartbeat = 0;
+  if (millis() - lastHeartbeat > 5000) {
+    lastHeartbeat = millis();
+    Serial.printf("DEBUG: Huawei Task heartbeat... WiFi: %d\n", WiFi.status());
+  }
+  */
+
   // Always run mb.task() if we think we are connected or trying to connect
-  // But be careful not to run it if we want to be "quiet"
   if (currentState == H_READING || currentState == H_CONNECTING) {
     mb.task();
   }
@@ -147,29 +150,32 @@ void loopHuawei() {
   case H_INIT:
     // Wait 5s on boot to allow WiFi to stabilize and EW11 to settle
     if (millis() - stateEntryTime > 5000) {
+      Serial.println("DEBUG: Huawei INIT -> WIFI_WAIT");
       changeState(H_WIFI_WAIT);
     }
     break;
 
   case H_WIFI_WAIT:
     if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("DEBUG: Huawei WIFI_WAIT -> CONNECTING");
       changeState(H_CONNECTING);
+    } else {
+      static unsigned long lastWifiLog = 0;
+      if (millis() - lastWifiLog > 10000) {
+        lastWifiLog = millis();
+        Serial.println("DEBUG: Huawei waiting for WiFi...");
+      }
     }
     break;
 
   case H_CONNECTING:
     if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("DEBUG: Huawei Lost WiFi while connecting.");
       changeState(H_WIFI_WAIT);
       return;
     }
 
-    // Attempt Connection
-    // Force cleanup first just in case
-    // mb.disconnect(inverterIp); // Ensure clean slate?
-    // Actually emelianov lib doesn't strictly require disconnect before
-    // connect, but good practice if we are retrying.
-
-    Serial.printf("Huawei: Connecting to %s...\n", INVERTER_IP);
+    Serial.printf("Huawei: Attempting connect to %s:%d...\n", INVERTER_IP, INVERTER_PORT);
     mb.connect(inverterIp, INVERTER_PORT);
 
     // Give it a moment? internal task() handles the handshake.
@@ -178,15 +184,16 @@ void loopHuawei() {
     mb.task();
 
     if (mb.isConnected(inverterIp)) {
-      Serial.println("Huawei: Connected!");
+      Serial.println("Huawei: Connected successfully!");
       errorCount = 0;
       changeState(H_READING);
     } else {
-      // Failed immediate check? Give it a timeout or go to backoff
-      // If we stay in CONNECTING, we might spam.
-      // Let's cycle to BACKOFF if this fails immediately.
-      Serial.println("Huawei: Connect Refused/Failed.");
-      changeState(H_BACKOFF);
+      Serial.println("Huawei: Connection not immediate. Waiting...");
+      // Let's stay in CONNECTING for a bit before backoff to allow async connect
+      if (millis() - stateEntryTime > 10000) {
+        Serial.println("Huawei: Connection timeout. Backing off.");
+        changeState(H_BACKOFF);
+      }
     }
     break;
 
@@ -204,58 +211,37 @@ void loopHuawei() {
       return;
     }
 
-    // Scheduler
-    if (millis() - lastReadTime > readInterval) {
+    // Scheduler: Prioritize Grid readings for faster DLB
+    if (millis() - lastReadTime > 1000) {
       lastReadTime = millis();
-
-      // Staggered reads: We can't easily wait between Grid and PV in one loop
-      // pass without complex sub-states or blocking. Be simple: Read Grid now.
-      // Read PV in next interval? Or Read Grid, then 500ms later Read PV? Let's
-      // alternate.
-      static int readToggle = 0;
+      static int pollCounter = 0;
 
       lastRequestTime = millis();
-      if (readToggle == 0) {
-// Read Grid (Reg 37113 usually for Active Power, check config)
-// config.h says GRID_POWER_REG.
-#ifdef DEBUG_HUAWEI
-        Serial.println("Huawei: Req Grid");
-#endif
-        mb.readHreg(inverterIp, GRID_POWER_REG, gridPowerBuf, 2, cbReadPower,
-                    INVERTER_SLAVE_ID);
-        // Using callback data to indicate type?
-        // Emelianov readHreg doesn't easily support passing user data in all
-        // versions, but let's check the signature from previous code. Previous
-        // code: mb.readHreg(ip, GRID_POWER_REG, gridPowerBuf, 2, cbReadPower,
-        // INVERTER_SLAVE_ID); Wait, previous code didn't pass user data!
-        // Previous callback: bool cbReadPower(Modbus::ResultCode event,
-        // uint16_t transactionId, void *data) But how did it know the type?
-        // Previous code used global `lastRequestType`.
-        // My new code tries to pass `(void*)0`.
-        // The standard library `readHreg` usually signature is:
-        // (ip, reg, buf, count, cb, unit)
-        // It does NOT have a user-data parameter in standard
-        // emelianov/modbus-esp8266. I must revert to using a global
-        // `lastRequestType` or similar context approach.
-
-        lastRequestType = 0;
-        readToggle = 1;
-      } else {
-// Read PV (Reg 32080 usually)
+      if (pollCounter % 5 == 0) {
+        // PV Power - Read every 5 seconds
 #ifdef DEBUG_HUAWEI
         Serial.println("Huawei: Req PV");
 #endif
         mb.readHreg(inverterIp, ACTIVE_POWER_REG, gridPowerBuf, 2, cbReadPower,
                     INVERTER_SLAVE_ID);
         lastRequestType = 1;
-        readToggle = 0;
+      } else {
+        // Grid Power - Read 4 out of 5 seconds
+#ifdef DEBUG_HUAWEI
+        Serial.println("Huawei: Req Grid");
+#endif
+        mb.readHreg(inverterIp, GRID_POWER_REG, gridPowerBuf, 2, cbReadPower,
+                    INVERTER_SLAVE_ID);
+        lastRequestType = 0;
       }
+      pollCounter++;
     }
     break;
 
   case H_BACKOFF:
     // Wait 10s before trying again to let EW11 clear sockets
     if (millis() - stateEntryTime > 10000) {
+      Serial.println("DEBUG: Backoff finished. Retrying WiFi Wait.");
       changeState(H_WIFI_WAIT); // Go check wifi then connect
     }
     break;

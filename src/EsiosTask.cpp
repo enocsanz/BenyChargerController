@@ -1,5 +1,10 @@
 #include "EsiosTask.h"
+#include "config.h"
+#include <Arduino.h>
+#include <ArduinoJson.h>
+#include <HTTPClient.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 
 PriceState esios_prices;
 const char *esios_url =

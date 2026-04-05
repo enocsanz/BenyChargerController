@@ -25,7 +25,7 @@ const float CHARGER_POWER_KW = 2.3;
 // Global State
 // bool relay_state = false; -> REMOVED
 unsigned long lastLogicRun = 0;
-const unsigned long logicInterval = 2000; // Check every 2 seconds (DLB)
+const unsigned long logicInterval = 1000; // Check every 1 second (Faster DLB)
 
 // ISR for Button A
 volatile bool buttonPressed = false;
@@ -187,7 +187,7 @@ void setup() {
   lastLogicRun = millis() - logicInterval;
 
   extern void sendTelegramNotification(String msg);
-  String modeStr = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANCEO" : (charging_mode == 2) ? "TURBO" : "OFF";
+  String modeStr = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANCEO" : "OFF";
   sendTelegramNotification("🚀 Sistema Iniciado. Modo actual: " + modeStr);
 }
 
@@ -211,7 +211,7 @@ void runSmartChargingLogic() {
     return;
   }
 
-  if (charging_mode == 3) { // Mode 3: OFF
+  if (charging_mode == 2) { // Mode 2: OFF
     if (bd.status == "CHARGING" || bd.status == "STARTING") {
       benyStopCharge();
       Serial.println("Manual: Deteniendo carga (Modo OFF).");
@@ -236,119 +236,67 @@ void runSmartChargingLogic() {
   }
 
   // --- AUTO PAUSE / RESTART LOGIC ---
-  if (charging_mode != 2) { // Not Turbo
-    if (!auto_paused) {
-      bool exceed = false;
-      if (charging_mode == 0) { // Solar
-        if (current_grid_power > 690) exceed = true;
-      } else if (charging_mode == 1) { // Balanceo
-        if (current_grid_power > max_grid_power) exceed = true;
-      }
-      
-      if (exceed) {
-        if (time_exceeded == 0) time_exceeded = millis();
-        if (millis() - time_exceeded >= pause_time_ms) {
-          auto_paused = true;
-          benyStopCharge();
-          Serial.println("Autoapagado: Pausando por exceso de red.");
-          time_exceeded = 0;
-          return; // Skip DLB this cycle
-        }
-      } else {
+  if (!auto_paused) {
+    bool exceed = false;
+    if (current_grid_power > max_grid_power) exceed = true;
+    
+    if (exceed) {
+      if (time_exceeded == 0) time_exceeded = millis();
+      if (millis() - time_exceeded >= pause_time_ms) {
+        auto_paused = true;
+        benyStopCharge();
+        Serial.println("Autoapagado: Pausando por exceso de red.");
         time_exceeded = 0;
+        return; // Skip DLB this cycle
       }
     } else {
-      // Is paused
-      float current_limit = (charging_mode == 0) ? 0 : max_grid_power;
-      bool available = (current_limit - current_grid_power) >= resume_margin_watts;
-      
-      if (available) {
-        if (time_available == 0) time_available = millis();
-        if (millis() - time_available >= resume_time_ms) {
-          auto_paused = false;
-          benyStartCharge();
-          Serial.println("Autoreinicio: Reanudando carga.");
-          time_available = 0;
-        }
-      } else {
-        time_available = 0;
-      }
-      return; // Skip DLB while paused
+      time_exceeded = 0;
     }
   } else {
-    // In Turbo mode, if previously auto-paused, force restart
-    if (auto_paused) {
-      auto_paused = false;
-      benyStartCharge();
-      Serial.println("Turbo activado: Forzando reanudacion.");
+    // Is paused
+    float current_limit = (charging_mode == 0) ? 0 : max_grid_power;
+    bool available = (current_limit - current_grid_power) >= resume_margin_watts;
+    
+    if (available) {
+      if (time_available == 0) time_available = millis();
+      if (millis() - time_available >= resume_time_ms) {
+        auto_paused = false;
+        benyStartCharge();
+        Serial.println("Autoreinicio: Reanudando carga.");
+        time_available = 0;
+      }
+    } else {
+      time_available = 0;
     }
+    return; // Skip DLB while paused
   }
 
-  // --- MOVING AVERAGE FILTER FOR GRID POWER ---
-  grid_history[grid_history_index] = current_grid_power;
-  grid_history_index++;
-  if (grid_history_index >= 5) {
-    grid_history_index = 0;
-    grid_history_filled = true;
-  }
-  
-  int count = grid_history_filled ? 5 : (grid_history_index == 0 ? 1 : grid_history_index);
-  int32_t sum = 0;
-  for (int i = 0; i < count; i++) {
-    sum += grid_history[i];
-  }
-  int32_t avg_grid_power = sum / count;
+  // --- STEP-BY-STEP DLB (±1A per second) ---
+  int32_t limit_watts = (charging_mode == 0) ? SOLAR_GRID_TARGET : max_grid_power;
+  int ideal_amps = target_amps;
 
-  // 2. READ GRID POWER (Instant used above for auto-pause, avg used here for DLB)
-  // We want to keep Import <= LIMIT.
-
-  // 3. CALCULATE AVAILABLE HEADROOM
-  // Headroom = Limit - Current
-  float limit_watts = max_grid_power; // Default Mode 1 or 2 (Balanceo/Turbo)
-
-  if (charging_mode == 0) {
-    // Mode 0: Solar / Surplus
-    // Target: 0 Grid Import
-    limit_watts = 0;
+  // Hysteresis: Skip adjustment if within 200W of limit to avoid jitter
+  if (current_grid_power > (limit_watts + 200)) {
+    // Over the limit -> Reduce by 1A
+    ideal_amps = target_amps - 1;
+  } else if (current_grid_power < (limit_watts - 200)) {
+    // Under the limit -> Increase by 1A
+    ideal_amps = target_amps + 1;
   }
 
-  float error_watts = limit_watts - avg_grid_power;
+  // 4. CLAMPING
+  if (ideal_amps < BENY_MIN_AMPS) ideal_amps = BENY_MIN_AMPS;
+  if (ideal_amps > BENY_MAX_AMPS) ideal_amps = BENY_MAX_AMPS;
 
-  // 4. CALCULATE IDEAL AMPS
-  // Change needed = Error / 230V
-  int amps_delta = (int)(error_watts / 230.0);
-
-  int current_set_amps = target_amps; // Our last known setpoint
-  int ideal_amps = current_set_amps + amps_delta;
-
-  Serial.printf("DLB: Grid %d, Limit %.0f, Err %.0f, CurSet %d -> Ideal %d\n",
-                current_grid_power, limit_watts, error_watts, current_set_amps,
-                ideal_amps);
-
-  // 5. CLAMPING
-  // Min: 6A (1.4kW) - Cannot go lower without stopping (forbidden).
-  if (ideal_amps < BENY_MIN_AMPS) {
-    Serial.println("DLB: Ideal < 6A. Clamping to 6A (Cannot Stop).");
-    ideal_amps = BENY_MIN_AMPS;
-  }
-  // Max: 22A
-  if (ideal_amps > BENY_MAX_AMPS) {
-    ideal_amps = BENY_MAX_AMPS;
-  }
-
-  // 6. ACTUATION
-  // Check if we need to update:
-  // 1. If calculated different from target var (Change needed)
-  // 2. If reported amps different from target var (Sync needed)
+  // 5. ACTUATION & SYNC
+  // Sync if reported physical current is significantly different from target
   bool sync_needed = (abs(bd.current - target_amps) > 2);
 
   if (ideal_amps != target_amps || sync_needed) {
-    Serial.printf("DLB: Adjusting %d -> %dA (Phys: %.1fA)\n", target_amps,
-                  ideal_amps, bd.current);
+    Serial.printf("DLB: Grid %d, Limit %d | Adjusting %d -> %dA (Phys: %.1fA)\n",
+                  current_grid_power, limit_watts, target_amps, ideal_amps, bd.current);
     target_amps = ideal_amps;
     benySetCurrent(target_amps);
-  } else {
-    // Optional: periodic refresh every X loops?
   }
 }
 
@@ -383,7 +331,8 @@ void drawStatusScreen(bool fullClear) {
   } else {
     M5.Lcd.setTextColor(RED, BLACK); // Importing > 5kW
   }
-  M5.Lcd.printf("Grid: %.3f/%.3f\n", (float)current_grid_power / 1000.0,
+  float grid_kw = (float)current_grid_power / 1000.0;
+  M5.Lcd.printf("Grid: %s%.3f/%.1f \n", (grid_kw > 0 ? "+" : ""), grid_kw,
                 (float)max_grid_power / 1000.0);
 
   // Solar
@@ -416,9 +365,6 @@ void drawStatusScreen(bool fullClear) {
   } else if (charging_mode == 1) {
     M5.Lcd.setTextColor(ORANGE, BLACK);
     M5.Lcd.printf("Mode: BALANCEO\n");
-  } else if (charging_mode == 2) {
-    M5.Lcd.setTextColor(RED, BLACK);
-    M5.Lcd.printf("Mode: TURBO   \n");
   } else {
     M5.Lcd.setTextColor(WHITE, BLACK);
     M5.Lcd.printf("Mode: OFF     \n");
@@ -426,8 +372,13 @@ void drawStatusScreen(bool fullClear) {
 
   // Auto-pause warning
   if (auto_paused) {
-    M5.Lcd.setTextColor(RED, BLACK);
-    M5.Lcd.printf(" PAUSA AUTO (Exceso)   \n");
+    if (bd.status == "CHARGING" || bd.status == "STARTING") {
+      M5.Lcd.setTextColor(YELLOW, BLACK);
+      M5.Lcd.printf(" PAUSANDO... (Exceso)   \n");
+    } else {
+      M5.Lcd.setTextColor(RED, BLACK);
+      M5.Lcd.printf(" PAUSA AUTO (Exceso)   \n");
+    }
   }
 
   // Line 3: Status (Pad with spaces to overwrite previous long text)
@@ -452,7 +403,9 @@ void drawStatusScreen(bool fullClear) {
 void wakeScreen() {
   lastInteractionTime = millis();
   if (!screenAwake) {
-    M5.Lcd.writecommand(0x29); // ST7789 DISPON - Display ON
+    M5.Axp.SetLDO2(true);        // Power on LDO2 (Backlight)
+    M5.Axp.ScreenBreath(100);    // Max brightness (M5StickC-Plus uses 0-100)
+    M5.Lcd.writecommand(0x29);  // ST7789 DISPON
     screenAwake = true;
     redraw = true;
     Serial.println("Screen: Wake up");
@@ -461,7 +414,9 @@ void wakeScreen() {
 
 void sleepScreen() {
   if (screenAwake) {
-    M5.Lcd.writecommand(0x28); // ST7789 DISPOFF - Display OFF (backlight stays but shows black)
+    M5.Axp.ScreenBreath(0);      // Dims to zero
+    M5.Axp.SetLDO2(false);       // Cuts power to backlight
+    M5.Lcd.writecommand(0x28);  // ST7789 DISPOFF
     screenAwake = false;
     Serial.println("Screen: Sleep");
   }
@@ -486,13 +441,13 @@ void loop() {
     wakeScreen(); // Always wake
 
     if (wasAwake) { // Only change mode if screen was already on
-      charging_mode = (charging_mode + 1) % 4; // Now 4 modes (0,1,2,3)
+      charging_mode = (charging_mode + 1) % 3; // Now 3 modes (0=Solar, 1=Balanceo, 2=OFF)
       saveMode(charging_mode);
       manual_logic_trigger = true;
       Serial.printf("Button A Pressed: Mode set to %d\n", charging_mode);
       
       extern void sendTelegramNotification(String msg);
-      String modeStr = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANCEO" : (charging_mode == 2) ? "TURBO" : "OFF";
+      String modeStr = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANCEO" : "OFF";
       sendTelegramNotification("🔘 M5Stick Botón: Modo cambiado a " + modeStr);
     }
   }
@@ -521,42 +476,56 @@ void loop() {
   // Update Tasks
   loopTelegram();
   loopGoogleSheets();
+  
+  static unsigned long lastMainLog = 0;
+  if (millis() - lastMainLog > 10000) {
+    lastMainLog = millis();
+    Serial.println("MAIN: Calling loopHuawei...");
+  }
   loopHuawei();
+  
   loopBeny();
   loopEsios();
 
   // loopWeather(); // Updates forecast hourly REMOVED
 
-  // Run Logic Periodically
-  // Screen Refresh (0.5s)
+  // --- BACKGROUND TASKS ---
+  loopHuawei();  // Modbus polling
+  loopTelegram(); // Bot commands
+  loopGoogleSheets(); // Logging
+  loopEsios();   // Price updates
+
+  // --- SCREEN DISPATCHER (0.5s) ---
   static unsigned long lastScreenUpdate = 0;
   if (millis() - lastScreenUpdate > 500) {
     lastScreenUpdate = millis();
     redraw = true;
   }
+
+  // --- DLB LOGIC DISPATCHER (1s) ---
   if (millis() - lastLogicRun > logicInterval || manual_logic_trigger) {
     lastLogicRun = millis();
-    manual_logic_trigger = false; // Reset trigger
-
+    manual_logic_trigger = false; 
     runSmartChargingLogic();
-    // bool intent = shouldCharge(); REMOVED, inside SmartLogic
-
-    // Relay Actuation REMOVED
-    // if (intent != relay_state) { ... }
-
-    // Decrement required_kwh if charging
-    // Decrement required_kwh simulation REMOVED (Relay not active)
-
-    // Logic run forces a redraw to update values
     redraw = true;
   }
 
-  // Draw Screen if needed
+  // --- LCD REDRAW ---
   if (redraw) {
-    drawStatusScreen(false); // Always Status. Optimized.
+    drawStatusScreen(false);
     redraw = false;
   }
 
-  // Minimal delay to prevent WDT and allow background tasks
-  delay(10);
+  // --- TELEMETRY LOGGING (1s) ---
+  static unsigned long lastTelemetry = 0;
+  if (millis() - lastTelemetry > 1000) {
+    lastTelemetry = millis();
+    BenyData bdt = getBenyData();
+    String modeName = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANC" : "OFF";
+    // Format: [1s-LOG] Grid,Solar,BenyP,Status,Mode
+    Serial.printf("[1s-LOG] %d, %d, %.0f, %s, %s\n", 
+                  current_grid_power, current_pv_power, bdt.power, bdt.status.c_str(), modeName.c_str());
+  }
+
+  delay(10); // Yield
 }

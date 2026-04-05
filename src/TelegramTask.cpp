@@ -52,72 +52,52 @@ void handleNewMessages(int numNewMessages) {
     String text = bot.messages[i].text;
     String from_name = bot.messages[i].from_name;
 
-    if (text == "/start") {
-      String welcome = "Hola " + from_name + ".\n";
-      welcome += "Comandos:\n";
-      welcome += "/status - Ver estado\n";
-      welcome += "/set_price <val> - Max precio (Solo info)\n";
-      welcome += "/set_limit <watts> - Max Grid Power\n";
-      welcome += "/set_pausa <segundos> - Tiempo autoapagado\n";
-      welcome += "/set_reinicio <segundos> - Tiempo autoreinicio\n";
-      welcome += "/set_margen <vatios> - Margen para reiniciar\n";
-      welcome += "/solar - Modo Solar (Solo excedentes)\n";
-      welcome += "/balanceo - Modo Balanceo (Hasta max red)\n";
-      welcome += "/turbo - Modo Turbo (Sin autoapagado)\n";
-      welcome += "/off - Desactivar cargador (Manual STOP)\n";
-      bot.sendMessage(chat_id, welcome, "");
-    } else if (text == "/help") {
-      String help = "Comandos:\n";
-      help += "/status - Ver estado\n";
-      help += "/set_price <val> - Max precio (Solo info)\n";
-      help += "/set_limit <watts> - Max Grid Power\n";
-      help += "/set_pausa <segundos> - Tiempo autoapagado\n";
-      help += "/set_reinicio <segundos> - Tiempo autoreinicio\n";
-      help += "/set_margen <vatios> - Margen para reiniciar\n";
-      help += "/solar - Modo Solar (Solo excedentes)\n";
-      help += "/balanceo - Modo Balanceo (Hasta max red)\n";
-      help += "/turbo - Modo Turbo (Sin autoapagado)\n";
-      help += "/off - Desactivar cargador (Manual STOP)\n";
-      bot.sendMessage(chat_id, help, "");
+    if (text == "/start" || text == "/help") {
+      String msg = "Control Beny V2\n\n";
+      msg += "📊 /status - Ver potencias y modo actual\n\n";
+      msg += "MODOS DE CARGA:\n";
+      msg += "🔋 SOLAR: /solar - Carga con excedentes. Si no hay sol, mantiene un minimo de 6A. Se detiene si superas los 4.6kW.\n";
+      msg += "⚖️ BALANCEO: /balanceo - Carga dinamica hasta aprovechar 4.6kW de casa.\n";
+      msg += "🛑 OFF: /off - Apagar el cargador por completo.\n\n";
+      msg += "AJUSTES: \n";
+      msg += "Limite Red: /set_limit W\n";
+      msg += "Tiempo Pausa: /set_pausa seg\n";
+      msg += "Tiempo Reinicio: /set_reinicio seg\n";
+      msg += "Margen: /set_margen W\n";
+      bot.sendMessage(chat_id, msg, "");
     } else if (text == "/status") {
-      String msg = "📊 *ESTADO DEL SISTEMA* 📊\n\n";
+      String msg = "📊 ESTADO DEL SISTEMA \n\n";
 
-      msg += "💰 *Precio Luz (PVPC)*: " + String(getCurrentPrice(), 3) +
-             " €/kWh\n\n";
+      msg += "💰 Precio Luz (PVPC): " + String(getCurrentPrice(), 3) + " E/kWh\n\n";
 
-      msg += "🏠 *Red (Grid)*: " + String((float)current_grid_power, 0) +
+      msg += "🏠 Red (Grid): " + String(current_grid_power > 0 ? "+" : "") + String((float)current_grid_power, 0) +
              " W / " + String(max_grid_power) + " W\n";
-      msg += "   _Limites: Pausa " + String(pause_time_ms/1000) + "s, Reinicio " + String(resume_time_ms/1000) + "s (" + String(resume_margin_watts) + "W)_\n";
-      msg += "   _(+ Importando / - Exportando)_\n";
-      msg += "☀️ *Solar*: " + String(current_pv_power) + " W\n\n";
+      msg += "   Limites: Pausa " + String(pause_time_ms/1000) + "s, Reinicio " + String(resume_time_ms/1000) + "s (" + String(resume_margin_watts) + "W)\n";
+      msg += "   (+ Importando / - Exportando)\n\n";
+      msg += "☀️ Solar: " + String(current_pv_power) + " W\n\n";
 
       BenyData bd = getBenyData();
-      msg += "🔌 *Cargador Beny*: " + String(bd.power, 1) + " W\n";
-      msg += "STATUS: " + bd.status + "\n\n";
+      msg += "🔌 Cargador Beny: " + String(bd.power, 1) + " W\n";
+      msg += "   STATUS: " + bd.status + "\n\n";
 
-      msg += "⚙️ *MODO ACTIVO*: ";
+      msg += "🚀 MODO ACTIVO: ";
       if (charging_mode == 0) {
         msg += "SOLAR\n";
-        msg += "   _Solo Excedentes_";
+        msg += "   Solo Excedentes (min 6A)";
       } else if (charging_mode == 1) {
         msg += "BALANCEO\n";
-        msg += "   _Carga Dinámica (Max Red " + String(max_grid_power) + "W)_";
-      } else if (charging_mode == 2) {
-        msg += "TURBO\n";
-        msg += "   _Ignora Autoapagado (Max Red " + String(max_grid_power) + "W)_";
+        msg += "   Carga Dinamica (Max Red " + String(max_grid_power) + "W)";
       } else {
         msg += "OFF\n";
-        msg += "   _Cargador Desactivado_";
+        msg += "   Cargador Desactivado";
       }
       msg += "\n";
       
       if (auto_paused) {
-        msg += "⚠️ *ESTADO: PAUSADO POR EXCESO DE RED*\n\n";
-      } else {
-        msg += "\n";
+        msg += "⚠️ ESTADO: PAUSADO POR EXCESO DE RED\n";
       }
 
-      bot.sendMessage(chat_id, msg, "Markdown");
+      bot.sendMessage(chat_id, msg, "");
 
     } else if (text.startsWith("/set_price ")) {
       String val_str = text.substring(11);
@@ -143,12 +123,10 @@ void handleNewMessages(int numNewMessages) {
         saveMaxGridPower(val);
         manual_logic_trigger = true; // Run logic now
 
-        bot.sendMessage(
-            chat_id, "Limite de Red actualizado a " + String(val) + " W.", "");
+        bot.sendMessage(chat_id, "Limite de Red actualizado a " + String(val) + " W.", "");
       } else {
         bot.sendMessage(chat_id, "Valor invalido (Min 1000, Max 10000)", "");
       }
-      //     } else if (text.startsWith("/force ")) { ... REMOVED
     } else if (text.startsWith("/set_pausa ")) {
       unsigned long val = text.substring(11).toInt();
       if (val >= 10 && val <= 3600) {
@@ -171,10 +149,7 @@ void handleNewMessages(int numNewMessages) {
         bot.sendMessage(chat_id, "Margen de reinicio puesto a " + String(val) + "W.", "");
       }
     } else if (text == "/turbo") {
-      charging_mode = 2;
-      saveMode(charging_mode);
-      manual_logic_trigger = true;
-      bot.sendMessage(chat_id, "Modo: TURBO (Sin autoapagado de red).", "");
+      bot.sendMessage(chat_id, "❌ El modo Turbo ha sido eliminado.", "");
     } else if (text == "/solar") {
       charging_mode = 0;
       saveMode(charging_mode);
@@ -206,7 +181,7 @@ void sendTelegramNotification(String msg) {
 }
 
 void loopTelegram() {
-  // Debug heap occasionally
+  // Debug
   if (millis() % 10000 == 0) {
     // Very verbose, maybe tone down
     Serial.printf("Telegram: Polling... (Heap: %d)\n", ESP.getFreeHeap());

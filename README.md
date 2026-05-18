@@ -36,7 +36,6 @@ El objetivo principal es maximizar el autoconsumo solar, proteger la instalació
 |------|----|-------------|-------------|
 | ☀️ **Solar** | 0 | Carga con excedentes (min 6A consumiendo de red si falta sol). | ✅ Activo (max 4.6kW) |
 | ⚖️ **Balanceo** | 1 | Carga dinámica rápida aprovechando hasta la potencia contratada. | ✅ Activo (max 4.6kW) |
-| 🌑 **OFF** | 2 | Cargador desactivado manualmente. | - |
 
 **Modo por defecto:** Solar (ID 0).
 
@@ -138,7 +137,7 @@ Cada hora en punto, el sistema envía un `GET` al Google Apps Script con los sig
 | `grid` | int | Potencia de red (W). Positivo = importando. |
 | `solar` | int | Producción solar (W). |
 | `price` | float | Precio PVPC actual (€/kWh). |
-| `mode` | int | Modo activo (0=Solar, 1=Balanceo, 2=OFF). |
+| `mode` | int | Modo activo (0=Solar, 1=Balanceo). |
 | `beny_w` | int | Potencia de carga del Beny (W). |
 | `paused` | int | 1 si está en pausa automática, 0 si no. |
 
@@ -175,7 +174,7 @@ Los siguientes valores se guardan en la memoria flash (NVS) del ESP32 y sobreviv
 
 | Clave | Tipo | Descripción |
 |-------|------|-------------|
-| `mode` | int | Modo de carga activo (0, 1, 2). |
+| `mode` | int | Modo de carga activo (0, 1). |
 | `limit` | int | Límite de potencia de red (W). |
 | `t_pause` | ulong | Tiempo de tolerancia de autoapagado (ms). |
 | `t_resume` | ulong | Tiempo de espera de autoreinicio (ms). |

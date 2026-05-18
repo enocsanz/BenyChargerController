@@ -4,6 +4,13 @@ Sistema de control de carga para vehículos eléctricos basado en **M5StickC Plu
 
 El objetivo principal es maximizar el autoconsumo solar, proteger la instalación eléctrica y permitir el control remoto total vía **Telegram**.
 
+## Mejoras de Estabilidad (Última versión)
+
+- **Arranque tolerante a fallos de NTP**: El sistema puede arrancar y funcionar (sin hora) si el servidor NTP no responde en 10 segundos, evitando bloqueos infinitos y reinicios por Watchdog.
+- **Modbus Huawei Asíncrono Robusto**: Múltiples peticiones de lectura TCP a los contadores Grid y Solar manejan sus propios buffers, impidiendo solapamientos y falsas lecturas si el inversor retrasa respuestas. 
+- **Verificación de tramas UDP Beny**: Descarte automático de mensajes corruptos o incompletos para proteger al sistema de picos irreales de potencia o cambios de estado erróneos.
+- **Throttling Automático**: Adaptación de las peticiones Modbus TCP si se detecta alta latencia por parte del inversor Huawei (para prevenir cuelgues del dispositivo puente EW11).
+
 ## Arquitectura del Sistema
 
 ```

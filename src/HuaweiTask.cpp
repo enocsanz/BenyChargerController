@@ -10,8 +10,8 @@ ModbusIP mb;
 // Data Globals
 int32_t current_grid_power = 0;
 int32_t current_pv_power = 0;
-uint16_t gridPowerBuf[2]; // Buffer for 2x16-bit registers
-int lastRequestType = 0;  // 0 = Grid, 1 = PV
+uint16_t gridPowerBuf[2]; // Buffer for Grid Power registers
+uint16_t pvPowerBuf[2];   // Buffer for PV Power registers
 
 // State Machine
 enum HuaweiState { H_INIT, H_WIFI_WAIT, H_CONNECTING, H_READING, H_BACKOFF };
@@ -41,52 +41,43 @@ void changeState(HuaweiState newState);
 void restartEW11(); // Keep the EW11 restarter just in case
 
 // --- Callbacks ---
-bool cbReadPower(Modbus::ResultCode event, uint16_t transactionId, void *data) {
+void handleLatency() {
   unsigned long latency = millis() - lastRequestTime;
-
-  if (event == Modbus::EX_SUCCESS) {
-    // Saturation Check: If latency > 200ms, slow down
-    if (latency > 200) {
-      readInterval = READ_INTERVAL_SLOW;
-      // Serial.printf("Huawei: Slow response (%lums). Throttling.\n", latency);
-    } else {
-      readInterval = READ_INTERVAL_NORMAL;
-    }
-
-    // Huawei sends Big Endian (Int32)
-    int32_t raw = (int32_t)((gridPowerBuf[0] << 16) | gridPowerBuf[1]);
-
-    // Determine what we just read based on context or user argument 'data'
-    // But 'data' is passed from readHreg. Let's use a simple global flag or
-    // just deduce functionality.
-    // Simpler: use the transactionId or just a toggling logic in loop.
-    // For now, let's look at the raw value to sanity check? No, raw can be
-    // anything. Rely on the logic that issued the command.
-    // WE WILL HANDLE DECODING IN THE MAIN LOOP OR ASSUME SEQUENTIAL EXECUTION.
-    // Actually, the callback doesn't easily tell us WHICH register was read
-    // unless we pass it in 'data'.
-    // Let's pass (void*)0 for Grid, (void*)1 for PV.
-
-    // 0 = Grid, 1 = PV
-    if (lastRequestType == 0) {
-      // Huawei Smart Meter:
-      // Standard: Positive = Import, Negative = Export.
-      // Some installs are wired backwards.
-      if (HUAWEI_INVERT_POWER) {
-        current_grid_power = -raw;
-      } else {
-        current_grid_power = raw;
-      }
-    } else { // PV
-      current_pv_power = raw;
-#ifdef DEBUG_HUAWEI
-      Serial.printf("Huawei: PV %d W\n", current_pv_power);
-#endif
-    }
-
-    errorCount = 0; // Reset errors on success
+  if (latency > 200) {
+    readInterval = READ_INTERVAL_SLOW;
   } else {
-    Serial.printf("Huawei: Modbus Error 0x%02X (Lat: %lums)\n", event, latency);
+    readInterval = READ_INTERVAL_NORMAL;
+  }
+}
+
+bool cbReadGridPower(Modbus::ResultCode event, uint16_t transactionId, void *data) {
+  handleLatency();
+  if (event == Modbus::EX_SUCCESS) {
+    int32_t raw = (int32_t)((gridPowerBuf[0] << 16) | gridPowerBuf[1]);
+    if (HUAWEI_INVERT_POWER) {
+      current_grid_power = -raw;
+    } else {
+      current_grid_power = raw;
+    }
+    errorCount = 0;
+  } else {
+    Serial.printf("Huawei: Modbus Error Grid 0x%02X\n", event);
+    errorCount++;
+  }
+  return true;
+}
+
+bool cbReadPVPower(Modbus::ResultCode event, uint16_t transactionId, void *data) {
+  handleLatency();
+  if (event == Modbus::EX_SUCCESS) {
+    int32_t raw = (int32_t)((pvPowerBuf[0] << 16) | pvPowerBuf[1]);
+    current_pv_power = raw;
+#ifdef DEBUG_HUAWEI
+    Serial.printf("Huawei: PV %d W\n", current_pv_power);
+#endif
+    errorCount = 0;
+  } else {
+    Serial.printf("Huawei: Modbus Error PV 0x%02X\n", event);
     errorCount++;
   }
   return true;
@@ -212,7 +203,7 @@ void loopHuawei() {
     }
 
     // Scheduler: Prioritize Grid readings for faster DLB
-    if (millis() - lastReadTime > 1000) {
+    if (millis() - lastReadTime > readInterval) {
       lastReadTime = millis();
       static int pollCounter = 0;
 
@@ -222,17 +213,15 @@ void loopHuawei() {
 #ifdef DEBUG_HUAWEI
         Serial.println("Huawei: Req PV");
 #endif
-        mb.readHreg(inverterIp, ACTIVE_POWER_REG, gridPowerBuf, 2, cbReadPower,
+        mb.readHreg(inverterIp, ACTIVE_POWER_REG, pvPowerBuf, 2, cbReadPVPower,
                     INVERTER_SLAVE_ID);
-        lastRequestType = 1;
       } else {
         // Grid Power - Read 4 out of 5 seconds
 #ifdef DEBUG_HUAWEI
         Serial.println("Huawei: Req Grid");
 #endif
-        mb.readHreg(inverterIp, GRID_POWER_REG, gridPowerBuf, 2, cbReadPower,
+        mb.readHreg(inverterIp, GRID_POWER_REG, gridPowerBuf, 2, cbReadGridPower,
                     INVERTER_SLAVE_ID);
-        lastRequestType = 0;
       }
       pollCounter++;
     }

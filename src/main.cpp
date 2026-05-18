@@ -152,25 +152,42 @@ void setup() {
   // digitalWrite(RELAY_PIN, LOW);
 
   // WiFi
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   M5.Lcd.print("WiFi");
+  unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - wifiStart > 30000) {
+      Serial.println("WiFi: Timeout - reiniciando...");
+      ESP.restart();
+    }
     delay(500);
     M5.Lcd.print(".");
+    esp_task_wdt_reset(); // Prevent WDT reset during WiFi connection
   }
   M5.Lcd.println(" OK");
 
   setupOTA(); // Init OTA
 
-  // Configure Time
-  configTime(3600, 3600, "pool.ntp.org");
+  // Configure Time — proper DST handling for Spain (CET/CEST)
+  configTime(0, 0, "pool.ntp.org");
+  setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+  tzset();
   M5.Lcd.print("Time");
   struct tm timeinfo;
-  while (!getLocalTime(&timeinfo)) {
+  unsigned long ntpStart = millis();
+  bool timeSet = false;
+  while (!(timeSet = getLocalTime(&timeinfo, 1000))) {
+    if (millis() - ntpStart > 10000) {
+      Serial.println("\nNTP: Timeout, continuing without correct time.");
+      M5.Lcd.print(" FAIL");
+      break;
+    }
     M5.Lcd.print(".");
-    delay(500);
+    esp_task_wdt_reset(); // Prevent WDT reset during NTP sync
   }
-  M5.Lcd.println(" OK");
+  if (timeSet) M5.Lcd.println(" OK");
 
   // Init Tasks
   setupTelegram();
@@ -187,7 +204,7 @@ void setup() {
   lastLogicRun = millis() - logicInterval;
 
   extern void sendTelegramNotification(String msg);
-  String modeStr = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANCEO" : "OFF";
+  String modeStr = (charging_mode == 0) ? "SOLAR" : "BALANCEO";
   sendTelegramNotification("🚀 Sistema Iniciado. Modo actual: " + modeStr);
 }
 
@@ -211,13 +228,7 @@ void runSmartChargingLogic() {
     return;
   }
 
-  if (charging_mode == 2) { // Mode 2: OFF
-    if (bd.status == "CHARGING" || bd.status == "STARTING") {
-      benyStopCharge();
-      Serial.println("Manual: Deteniendo carga (Modo OFF).");
-    }
-    return;
-  }
+
 
   // 2. AUTO-START: If waiting/standby and NOT paused, tell it to start
   if (!auto_paused && (bd.status == "WAITING" || bd.status == "STANDBY")) {
@@ -253,10 +264,19 @@ void runSmartChargingLogic() {
       time_exceeded = 0;
     }
   } else {
-    // Is paused
+    // Is paused — re-send stop if charger is still charging (UDP is unreliable)
+    if (bd.status == "CHARGING" || bd.status == "STARTING") {
+      static unsigned long lastStopRetry = 0;
+      if (millis() - lastStopRetry > 5000) {
+        lastStopRetry = millis();
+        benyStopCharge();
+        Serial.println("Auto-pausa: Reintentando orden STOP (cargador aun activo).");
+      }
+    }
+
     float current_limit = (charging_mode == 0) ? 0 : max_grid_power;
     bool available = (current_limit - current_grid_power) >= resume_margin_watts;
-    
+
     if (available) {
       if (time_available == 0) time_available = millis();
       if (millis() - time_available >= resume_time_ms) {
@@ -365,9 +385,6 @@ void drawStatusScreen(bool fullClear) {
   } else if (charging_mode == 1) {
     M5.Lcd.setTextColor(ORANGE, BLACK);
     M5.Lcd.printf("Mode: BALANCEO\n");
-  } else {
-    M5.Lcd.setTextColor(WHITE, BLACK);
-    M5.Lcd.printf("Mode: OFF     \n");
   }
 
   // Auto-pause warning
@@ -441,13 +458,13 @@ void loop() {
     wakeScreen(); // Always wake
 
     if (wasAwake) { // Only change mode if screen was already on
-      charging_mode = (charging_mode + 1) % 3; // Now 3 modes (0=Solar, 1=Balanceo, 2=OFF)
+      charging_mode = (charging_mode + 1) % 2; // Now 2 modes (0=Solar, 1=Balanceo)
       saveMode(charging_mode);
       manual_logic_trigger = true;
       Serial.printf("Button A Pressed: Mode set to %d\n", charging_mode);
       
       extern void sendTelegramNotification(String msg);
-      String modeStr = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANCEO" : "OFF";
+      String modeStr = (charging_mode == 0) ? "SOLAR" : "BALANCEO";
       sendTelegramNotification("🔘 M5Stick Botón: Modo cambiado a " + modeStr);
     }
   }
@@ -470,6 +487,20 @@ void loop() {
     sleepScreen();
   }
 
+  // WiFi watchdog: restart if disconnected for >60s
+  static unsigned long wifiDownSince = 0;
+  if (WiFi.status() != WL_CONNECTED) {
+    if (wifiDownSince == 0) {
+      wifiDownSince = millis();
+      Serial.println("WiFi: Desconectado, esperando reconexion...");
+    } else if (millis() - wifiDownSince > 60000) {
+      Serial.println("WiFi: Sin conexion 60s - reiniciando...");
+      ESP.restart();
+    }
+  } else {
+    wifiDownSince = 0;
+  }
+
   // Handle OTA
   ArduinoOTA.handle();
 
@@ -488,12 +519,6 @@ void loop() {
   loopEsios();
 
   // loopWeather(); // Updates forecast hourly REMOVED
-
-  // --- BACKGROUND TASKS ---
-  loopHuawei();  // Modbus polling
-  loopTelegram(); // Bot commands
-  loopGoogleSheets(); // Logging
-  loopEsios();   // Price updates
 
   // --- SCREEN DISPATCHER (0.5s) ---
   static unsigned long lastScreenUpdate = 0;
@@ -521,7 +546,7 @@ void loop() {
   if (millis() - lastTelemetry > 1000) {
     lastTelemetry = millis();
     BenyData bdt = getBenyData();
-    String modeName = (charging_mode == 0) ? "SOLAR" : (charging_mode == 1) ? "BALANC" : "OFF";
+    String modeName = (charging_mode == 0) ? "SOLAR" : "BALANC";
     // Format: [1s-LOG] Grid,Solar,BenyP,Status,Mode
     Serial.printf("[1s-LOG] %d, %d, %.0f, %s, %s\n", 
                   current_grid_power, current_pv_power, bdt.power, bdt.status.c_str(), modeName.c_str());

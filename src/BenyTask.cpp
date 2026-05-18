@@ -121,6 +121,10 @@ void parseResponse(String response) {
 
   // Python: SERVER_MESSAGE.SEND_VALUES_1P = 0x1E (30)
   if (msgType == 30) {
+    if (response.length() < 32) {
+      if (PacketDebug) Serial.printf("Beny: Ignore short type 30 packet (%d chars)\n", response.length());
+      return;
+    }
     // Adjusted Structure based on observation:
     // request_type: 10-12
     // skipped: 12-14
@@ -148,7 +152,7 @@ void parseResponse(String response) {
     float watts = volts * amps;
 
     // Always log RAW for now
-    if (PacketDebug || true) {
+    if (PacketDebug) {
       Serial.printf("Beny RAW: %s. PwrHex: %s -> %.0f. Calc W: %.1f\n",
                     response.c_str(), pwrHex.c_str(), rawWatts, watts);
     }

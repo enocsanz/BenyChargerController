@@ -10,7 +10,7 @@ extern float getCurrentPrice();
 extern int32_t current_grid_power;
 extern int32_t current_pv_power;
 extern int charging_mode;
-extern bool auto_paused;
+extern int target_amps;
 
 unsigned long lastSheetsCheck = 0;
 bool sent_this_hour = false;
@@ -27,8 +27,6 @@ void loopGoogleSheets() {
       return;
 
     // Condition: Hourly logging (Minute == 0)
-    // Removed relay_state check as user removed relay integration.
-
     if (timeinfo.tm_min == 0) {
       if (!sent_this_hour) {
         Serial.println("GoogleSheets: Sending hourly log...");
@@ -38,11 +36,8 @@ void loopGoogleSheets() {
           client.setInsecure();
           HTTPClient http;
 
-          // Construct URL
-          // Script expects GET format commonly.
-          // Assuming Date/Time is handled by script or we send it.
-          // Params: date, time, grid, solar, tuya, price
-
+          // Construct URL. Params: date, time, grid, solar, price, mode,
+          // beny_w, amps (see google_apps_script.js)
           char dateStr[20];
           char timeStr[20];
           strftime(dateStr, 20, "%d/%m/%Y", &timeinfo);
@@ -58,7 +53,7 @@ void loopGoogleSheets() {
           url += "&price=" + String(getCurrentPrice(), 3);
           url += "&mode=" + String(charging_mode);
           url += "&beny_w=" + String((int)bd.power);
-          url += "&paused=" + String(auto_paused ? 1 : 0);
+          url += "&amps=" + String(target_amps);
 
           Serial.printf("GoogleSheets: Request: %s\n", url.c_str());
 

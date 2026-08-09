@@ -8,22 +8,14 @@
 #include <WiFiClientSecure.h>
 
 // Externs from main.cpp
-// extern float demand_kwh; REMOVED
-// extern bool charging_schedule[24]; REMOVED
 extern float getCurrentPrice();
 extern int32_t current_grid_power;
 extern int32_t current_pv_power;
-extern int charging_mode;       // 0=Solar, 1=Balanceo, 2=OFF
+extern int charging_mode;       // 0=Solar, 1=Balanceo
 extern int max_grid_power;      // Added for dynamic limit
+extern int target_amps;         // Current DLB setpoint (A)
 extern void saveMode(int mode); // Added for persistence
 extern void saveMaxGridPower(int watts);
-extern void saveConfigVals();
-extern unsigned long pause_time_ms;
-extern unsigned long resume_time_ms;
-extern int resume_margin_watts;
-extern bool auto_paused;
-// extern float tuya_current_power;
-// extern bool is_planned_for_tomorrow; REMOVED
 
 WiFiClientSecure clientTCP;
 UniversalTelegramBot bot(BOT_TOKEN, clientTCP);
@@ -31,13 +23,19 @@ UniversalTelegramBot bot(BOT_TOKEN, clientTCP);
 unsigned long lastTelegramTime = 0;
 const int telegramInterval = 2000;
 
+// Outgoing notification queue.
+// sendTelegramNotification() is called from the main loop and from setup(),
+// where a blocking HTTPS request would stall the loop for seconds and risk a
+// WDT reset. So callers only leave the text here; loopTelegram() does the
+// actual send, in the task that already owns the network client.
+const int NOTIFY_QUEUE_SIZE = 4;
+String notifyQueue[NOTIFY_QUEUE_SIZE];
+int notifyCount = 0;
+
 void setupTelegram() {
   clientTCP.setInsecure();
   clientTCP.setHandshakeTimeout(20000);
-  // bot.longPoll = 1; // Faster response?
 }
-
-// Duplicate function definition removed.
 
 String last_chat_id = ""; // Store for proactive notifications
 
@@ -56,15 +54,16 @@ void handleNewMessages(int numNewMessages) {
 
     if (textLower == "/start" || textLower == "/help") {
       String msg = "Control Beny V2\n\n";
-      msg += "📊 /status - Ver potencias y modo actual\n\n";
+      msg += "📊 /status - Ver potencias, modo y amperaje actual\n\n";
       msg += "MODOS DE CARGA:\n";
-      msg += "🔋 SOLAR: /solar - Carga con excedentes. Si no hay sol, mantiene un minimo de 6A. Se detiene si superas los 4.6kW.\n";
-      msg += "⚖️ BALANCEO: /balanceo - Carga dinamica hasta aprovechar 4.6kW de casa.\n\n";
+      msg += "🔋 SOLAR: /solar - Carga con excedentes, ajustando el amperaje para no importar de red.\n";
+      msg += "⚖️ BALANCEO: /balanceo - Carga dinamica aprovechando hasta el limite de red.\n\n";
+      msg += "En ambos modos el amperaje sube y baja 1A/s entre " + String(BENY_MIN_AMPS) +
+             "A y " + String(BENY_MAX_AMPS) + "A. El minimo de " + String(BENY_MIN_AMPS) +
+             "A es el suelo del cargador: si no hay sol, ese consumo se toma de la red.\n\n";
       msg += "AJUSTES: \n";
-      msg += "Limite Red: /set_limit W\n";
-      msg += "Margen reanudación: /set_margen W (Excedente necesario para volver a arrancar)\n";
-      msg += "Tiempo Pausa: /set_pausa seg (Segundos tolerando exceso antes de apagar)\n";
-      msg += "Tiempo Reinicio: /set_reinicio seg (Segundos de espera antes de reanudar)\n";
+      msg += "Limite Red: /set_limit W (Objetivo del modo Balanceo)\n";
+      msg += "Precio: /set_price E/kWh (Solo informativo, colorea la pantalla)\n";
       bot.sendMessage(chat_id, msg, "");
     } else if (textLower == "/status") {
       String msg = "📊 ESTADO DEL SISTEMA \n\n";
@@ -73,26 +72,28 @@ void handleNewMessages(int numNewMessages) {
 
       msg += "🏠 Red (Grid): " + String(current_grid_power > 0 ? "+" : "") + String((float)current_grid_power, 0) +
              " W / " + String(max_grid_power) + " W\n";
-      msg += "   Limites: /set_pausa " + String(pause_time_ms/1000) + "s, /set_reinicio " + String(resume_time_ms/1000) + "s (/set_margen " + String(resume_margin_watts) + "W)\n";
       msg += "   (+ Importando / - Exportando)\n\n";
       msg += "☀️ Solar: " + String(current_pv_power) + " W\n\n";
 
       BenyData bd = getBenyData();
       msg += "🔌 Cargador Beny: " + String(bd.power, 1) + " W\n";
-      msg += "   STATUS: " + bd.status + "\n\n";
+      msg += "   STATUS: " + bd.status + "\n";
+      msg += "   AMPERAJE: " + String(target_amps) + "A objetivo / " +
+             String(bd.current, 0) + "A real\n\n";
 
       msg += "🚀 MODO ACTIVO: ";
       if (charging_mode == 0) {
         msg += "SOLAR\n";
-        msg += "   Solo Excedentes (min 6A)";
+        msg += "   Solo Excedentes (min " + String(BENY_MIN_AMPS) + "A)";
       } else if (charging_mode == 1) {
         msg += "BALANCEO\n";
         msg += "   Carga Dinamica (Max Red " + String(max_grid_power) + "W)";
       }
       msg += "\n";
-      
-      if (auto_paused) {
-        msg += "⚠️ ESTADO: PAUSADO POR EXCESO DE RED\n";
+
+      if (target_amps <= BENY_MIN_AMPS && (bd.status == "CHARGING" || bd.status == "STARTING")) {
+        msg += "⚠️ Cargando al minimo (" + String(BENY_MIN_AMPS) +
+               "A): el DLB no puede bajar mas.\n";
       }
 
       bot.sendMessage(chat_id, msg, "");
@@ -125,33 +126,15 @@ void handleNewMessages(int numNewMessages) {
       } else {
         bot.sendMessage(chat_id, "Valor invalido (Min 1000, Max 10000)", "");
       }
-    } else if (textLower.startsWith("/set_pausa ")) {
-      unsigned long val = text.substring(11).toInt();
-      if (val >= 10 && val <= 3600) {
-        pause_time_ms = val * 1000;
-        saveConfigVals();
-        bot.sendMessage(chat_id, "Tolerancia de pausa puesta a " + String(val) + "s.", "");
-      } else {
-        bot.sendMessage(chat_id, "Valor invalido (Min 10, Max 3600 segundos).", "");
-      }
-    } else if (textLower.startsWith("/set_reinicio ")) {
-      unsigned long val = text.substring(14).toInt();
-      if (val >= 10 && val <= 3600) {
-        resume_time_ms = val * 1000;
-        saveConfigVals();
-        bot.sendMessage(chat_id, "Espera de reinicio puesta a " + String(val) + "s.", "");
-      } else {
-        bot.sendMessage(chat_id, "Valor invalido (Min 10, Max 3600 segundos).", "");
-      }
-    } else if (textLower.startsWith("/set_margen ")) {
-      int val = text.substring(12).toInt();
-      if (val >= 100 && val <= 8000) {
-        resume_margin_watts = val;
-        saveConfigVals();
-        bot.sendMessage(chat_id, "Margen de reinicio puesto a " + String(val) + "W.", "");
-      } else {
-        bot.sendMessage(chat_id, "Valor invalido (Min 100, Max 8000 W).", "");
-      }
+    } else if (textLower.startsWith("/set_pausa ") ||
+               textLower.startsWith("/set_reinicio ") ||
+               textLower.startsWith("/set_margen ")) {
+      bot.sendMessage(chat_id,
+                      "❌ La pausa automatica ha sido eliminada: el cargador esta "
+                      "en 'Plug and Charge' e ignoraba la orden de STOP, "
+                      "rearrancando a plena potencia. Ahora el consumo se regula "
+                      "solo con el amperaje (" + String(BENY_MIN_AMPS) + "-" +
+                      String(BENY_MAX_AMPS) + "A) via /set_limit.", "");
     } else if (textLower == "/turbo") {
       bot.sendMessage(chat_id, "❌ El modo Turbo ha sido eliminado.", "");
     } else if (textLower == "/solar") {
@@ -171,14 +154,33 @@ void handleNewMessages(int numNewMessages) {
   }
 }
 
+// Queues a notification. Safe to call from anywhere: it never touches the
+// network, so it cannot block the main loop or trip the watchdog.
 void sendTelegramNotification(String msg) {
-  if (last_chat_id != "") {
-    bot.sendMessage(last_chat_id, msg, "");
-  } else if (String(CHAT_ID) != "") {
-    bot.sendMessage(CHAT_ID, msg, "");
-  } else {
-    Serial.println("Tele: No ID to notify.");
+  if (notifyCount >= NOTIFY_QUEUE_SIZE) {
+    Serial.println("Tele: Notify queue full, dropping: " + msg);
+    return;
   }
+  notifyQueue[notifyCount++] = msg;
+}
+
+// Delivers one queued notification per call, so a burst never turns into a
+// long chain of blocking HTTPS requests inside a single loop iteration.
+void flushNotifications() {
+  if (notifyCount == 0) return;
+
+  String msg = notifyQueue[0];
+  for (int i = 1; i < notifyCount; i++) {
+    notifyQueue[i - 1] = notifyQueue[i];
+  }
+  notifyQueue[--notifyCount] = "";
+
+  String target = (last_chat_id != "") ? last_chat_id : String(CHAT_ID);
+  if (target == "") {
+    Serial.println("Tele: No ID to notify.");
+    return;
+  }
+  bot.sendMessage(target, msg, "");
 }
 
 void loopTelegram() {
@@ -197,5 +199,7 @@ void loopTelegram() {
       // Removed recursive loop to prevent blocking main loop
     }
     lastTelegramTime = millis();
+
+    flushNotifications();
   }
 }

@@ -6,12 +6,11 @@
 
 struct BenyData {
   bool online;
-  float power;       // W
-  float total_kwh;   // kWh
-  float voltage;     // V
-  float current;     // A
-  String status;     // CHARGING, STANDBY, etc.
-  bool allow_charge; // If we have enabled it (tracking our commands)
+  float power;     // W
+  float total_kwh; // kWh
+  float voltage;   // V
+  float current;   // A
+  String status;   // CHARGING, STANDBY, etc.
 };
 
 void setupBeny();

@@ -8,11 +8,9 @@
 
 void setupTelegram();
 void loopTelegram();
+// Queues a message; loopTelegram() performs the actual (blocking) send.
 void sendTelegramNotification(String msg);
 
-// extern float required_kwh; REMOVED
-
-extern bool force_charging_mode;  // Manual override
 extern float max_price_threshold; // Configurable max price
 extern bool manual_logic_trigger; // Trigger Logic run immediately
 

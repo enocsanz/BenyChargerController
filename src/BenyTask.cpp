@@ -6,7 +6,7 @@
 #include <cstring> // For memset
 
 WiFiUDP benyUdp;
-BenyData benyData = {false, 0, 0, 0, 0, "DISCONNECTED", false};
+BenyData benyData = {false, 0, 0, 0, 0, "DISCONNECTED"};
 
 unsigned long lastBenyPoll = 0;
 const int benyPollInterval = 2000; // Poll every 2 seconds

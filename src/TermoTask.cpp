@@ -62,7 +62,64 @@ void setTermoMaxPrice(float price) {
 
 void loopTermo() { relay.loop(); }
 
+// Overload the system can no longer fix: car already at its floor (or not
+// charging) and the heater not drawing. Nothing left to cut from here, so the
+// user is told to switch something off before the distributor cuts. Works on
+// the grid's 1-minute average, so a single dip does not restart the count
+// and a single peak does not trigger it.
+static const unsigned long ALERT_DELAY = 180000;   // 3 min sustained
+static const unsigned long ALERT_CLEAR = 120000;   // 2 min below the limit
+static const float ALERT_TAU = 60;                 // s, grid average
+
+static void checkOverloadAlert() {
+  static uint32_t lastSample = 0;
+  static unsigned long lastSampleTime = 0;
+  static float gridAvg = 0;
+  if (grid_sample_count == lastSample) {
+    return; // only on fresh readings: a stale one says nothing
+  }
+  float dt = lastSampleTime ? (millis() - lastSampleTime) / 1000.0 : ALERT_TAU;
+  lastSample = grid_sample_count;
+  lastSampleTime = millis();
+  gridAvg += (current_grid_power - gridAvg) * min(1.0f, dt / ALERT_TAU);
+
+  BenyData bd = getBenyData();
+  bool carCharging = (bd.status == "CHARGING" || bd.status == "STARTING");
+  bool carAtFloor = !carCharging || target_amps <= BENY_MIN_AMPS;
+  bool heaterOff = !relay.connected() || !relay.switchOn || relay.power < 100;
+  bool stuck = carAtFloor && heaterOff && gridAvg > CONTRACTED_POWER + SHED_MARGIN;
+
+  static unsigned long stuckSince = 0, okSince = 0;
+  static bool alerted = false;
+  if (!stuck) stuckSince = 0;
+  else if (stuckSince == 0) stuckSince = millis();
+
+  if (!alerted && stuckSince != 0 && millis() - stuckSince > ALERT_DELAY) {
+    alerted = true;
+    okSince = 0;
+    String car = carCharging ? "coche al minimo (" + String(BENY_MIN_AMPS) + "A)" : "sin coche cargando";
+    logEventf("SOBRECARGA", "Sostenida: media %.0f W, %s, termo sin consumo", gridAvg, car.c_str());
+    sendTelegramNotification("🚨 Sobrecarga sostenida: " + String(gridAvg, 0) + " W de media (limite " +
+                             String(CONTRACTED_POWER) + " W), " + car +
+                             " y termo sin consumo. Ya no queda nada que cortar desde aqui: "
+                             "apaga algo" +
+                             String(carCharging ? " o para el coche" : "") + ".");
+  }
+
+  if (alerted) {
+    if (gridAvg >= CONTRACTED_POWER) okSince = 0;
+    else if (okSince == 0) okSince = millis();
+    if (okSince != 0 && millis() - okSince > ALERT_CLEAR) {
+      alerted = false;
+      logEventf("SOBRECARGA", "Resuelta: media %.0f W", gridAvg);
+      sendTelegramNotification("✅ Sobrecarga resuelta: " + String(gridAvg, 0) + " W de media.");
+    }
+  }
+}
+
 void runTermoLogic() {
+  checkOverloadAlert();
+
   if (!relay.connected() || relay.lastUpdate == 0) {
     reason = TR_OFFLINE;
     return;

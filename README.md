@@ -53,7 +53,7 @@ El objetivo principal es maximizar el autoconsumo solar, proteger la instalació
 
 **Modo por defecto:** Solar (ID 0).
 
-En ambos modos el control es el mismo: **solo se modula el amperaje**, entre `BENY_MIN_AMPS` (6A) y `BENY_MAX_AMPS` (32A): baja de golpe si se pasa del objetivo y sube de 1 en 1 o de 2 en 2 A cuando hay margen. Lo único que cambia entre modos es el objetivo de potencia de red al que apunta el DLB.
+En ambos modos el control es el mismo: **solo se modula el amperaje**, entre `BENY_MIN_AMPS` (6A) y `BENY_MAX_AMPS` (32A), de 1 en 1 A en ambos sentidos. Lo único que cambia entre modos es el objetivo de potencia de red al que apunta el DLB.
 
 ## El mínimo de 6A es el suelo del sistema
 
@@ -66,22 +66,22 @@ Consecuencias que hay que tener presentes:
 - Cuando el sistema está en el suelo de 6A lo señala explícitamente: la fila de amperios de la pantalla pasa a amarillo y `/status` incluye un aviso.
 - Si quieres un corte real de la carga, hay que **desactivar Plug and Charge en el propio cargador**; desde el M5Dial no es posible garantizarlo.
 
-## Control Dinámico (DLB): baja rápido, sube despacio
+## Control Dinámico (DLB): pasos suaves de 1A
 
 El DLB compara la potencia de red con el objetivo del modo y ajusta el amperaje del Beny. Dos retardos condicionan el diseño:
 
 - **La lectura de red llega con retraso**: cada ~1 s, o cada 10 s si el inversor responde lento (throttling para no colgar el EW11).
 - **El coche tarda varios segundos** en seguir un nuevo objetivo de amperaje.
 
-La versión anterior ajustaba ±1A cada segundo aunque la lectura fuese la misma, acumulando correcciones antes de ver su efecto. Con un límite de 4,6 kW la red oscilaba entre ~2,7 y ~5,9 kW. Ahora:
+La primera versión ajustaba ±1A cada segundo aunque la lectura fuese la misma, acumulando correcciones antes de ver su efecto: con un límite de 4,6 kW la red oscilaba entre ~2,7 y ~5,9 kW. Después se probó a bajar de golpe al valor calculado, pero las bajadas resultaban demasiado bruscas y no hacían falta: la distribuidora tolera minutos por encima del límite (4,6 kW es la potencia contratada para pagar menos, la instalación aguanta bastante más). Ahora:
 
 1. **Solo actúa con una muestra nueva de red** (`grid_sample_count` en `HuaweiTask`). Si el dato no ha cambiado, no hace nada.
-2. **Por encima del objetivo baja de golpe**: calcula el amperaje que corresponde a partir de la **corriente real** del cargador (`corriente real + exceso / tensión`), no del objetivo anterior. Si ya se había pedido menos, espera a que el coche lo siga.
-3. **Por debajo del objetivo sube despacio**: como mucho `DLB_MAX_STEP_UP` (2A) por muestra, y solo cuando el coche ha alcanzado el objetivo anterior (si el coche se limita solo, por ejemplo cerca del 100 %, no se sigue subiendo).
+2. **Pasos de 1A por muestra** (cada 1-2 s), en ambos sentidos, siempre desde el objetivo anterior.
+3. **Espera a que el coche siga el paso anterior**: baja solo si la corriente real no supera el objetivo en más de 1A, y sube solo si ha llegado a menos de 1A del objetivo. Así los pasos no se acumulan, y si el coche se limita solo (por ejemplo cerca del 100 %) no se sigue subiendo.
 4. **Zona muerta de 200W** (`GRID_DEADBAND`) en torno al objetivo: dentro de ella no se emiten órdenes.
-5. **Resincronización limitada**: si la corriente real difiere más de 2A del objetivo (paquete UDP perdido, rearranque del cargador a su máximo), se reenvía el objetivo como mucho cada 10 s.
+5. **Resincronización**: si la corriente real difiere más de 2A del objetivo (paquete UDP perdido), el objetivo se reenvía como mucho cada 10 s. Si el coche consume **más** de lo pedido, se reenvía a los **3 s**: al rearrancar la sesión, el Beny sube por su cuenta hasta su máximo (se vio llegar a 27A con 19A pedidos y la red a 8,1 kW).
 
-Medido con el coche cargando y límite de 4,6 kW: el tiempo por encima de 5,2 kW bajó del 16 % al 1 % y la potencia media de carga subió de ~3,1 a ~3,6 kW. La variación que queda se debe sobre todo a los consumos de la casa, que por sí solos oscilan ±1 kW.
+La variación que queda se debe sobre todo a los consumos de la casa (lavadora, secadora, horno…), que por sí solos oscilan ±1 kW.
 
 ## Termo Eléctrico (ACS)
 
@@ -94,6 +94,7 @@ El termo tiene su propio termostato mecánico. Delante lleva un relé de carril 
 | **Precio** | PVPC de la hora > umbral (`/set_termo_precio`, 0,20 €/kWh por defecto) | Relé abierto hasta que el precio baje. |
 | **Sobrecarga** | Red > `CONTRACTED_POWER` + 200 W durante **30 s**, **con el coche ya al mínimo** (6A) o sin cargar | Relé abierto. Aviso por Telegram. |
 | **Vuelta tras sobrecarga** | Al menos **5 min** cortado y **2 min seguidos** con sitio para el termo | Relé cerrado. Aviso por Telegram. |
+| **Aviso de sobrecarga sin salida** | Media de red del último minuto > `CONTRACTED_POWER` + 200 W durante **3 min**, con el coche al mínimo (o sin cargar) y el termo sin consumo | 🚨 Aviso por Telegram: ya no queda nada que cortar, hay que apagar algo o parar el coche. Otro aviso cuando la media vuelve bajo el límite 2 min. |
 | **Encendido con sitio** | Al volver a estar permitido (baja el precio, `/termo_auto`, arranque) | Solo se cierra si el termo cabe; si no, espera a que haya sitio. Sin lectura de red todavía (arranque), espera hasta 5 min por ella y después se cierra igualmente. |
 | **Sin precio** | ESIOS no responde o no hay hora | El precio **no bloquea**: mejor una hora cara que quedarse sin agua caliente. |
 
@@ -277,6 +278,7 @@ El sistema envía mensajes proactivos a Telegram cuando:
 - Se inicia el sistema (indicando el modo activo).
 - Se cambia de modo pulsando el dial del M5Dial.
 - El termo se corta por sobrecarga, y cuando se reactiva.
+- Hay sobrecarga sostenida que el sistema ya no puede resolver (coche al mínimo, termo sin consumo), y cuando se resuelve.
 
 Las notificaciones **no se envían desde el punto donde se generan**: se encolan (hasta 4) y `loopTelegram()` entrega una por ciclo de polling. `bot.sendMessage()` es una petición HTTPS bloqueante de varios segundos, y llamarla desde `setup()` o desde la lógica de control podía agotar el watchdog de 30s y reiniciar el equipo.
 
@@ -313,7 +315,7 @@ CargadorBenyV2/
 |-------|----------|-------------|
 | Huawei (Modbus) | 1s | Lectura de potencia de red y solar. |
 | Beny (UDP) | 2s | Lectura de estado del cargador. |
-| Lógica DLB | 1s (actúa solo con muestra nueva de red) | Ajuste de amperaje: baja de golpe, sube hasta 2A por muestra. |
+| Lógica DLB | 1s (actúa solo con muestra nueva de red) | Ajuste de amperaje de 1A por muestra, en ambos sentidos. |
 | Telegram | 2s | Polling de mensajes entrantes. |
 | Pantalla | 500ms | Refresco de la interfaz visual. |
 | Google Sheets | 10s (check) / 1h (envío) | Envío de datos cada hora en punto. |

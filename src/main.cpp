@@ -20,11 +20,10 @@
 // Logic Constants
 // Dead band around the DLB target, to avoid amp jitter (W)
 const int32_t GRID_DEADBAND = 200;
-// Max amps added per fresh grid sample. Going up is slow on purpose, going
-// down is a single jump to the computed value.
-const int DLB_MAX_STEP_UP = 2;
 // Resend the setpoint at most this often when the charger does not follow it
 const unsigned long DLB_RESYNC_INTERVAL = 10000;
+// ...and sooner when it draws more than asked
+const unsigned long DLB_RESYNC_OVER = 3000;
 
 // Queues a message for the Telegram task. Never blocks: the actual HTTPS
 // request is issued from loopTelegram().
@@ -224,24 +223,22 @@ void runSmartChargingLogic() {
 
   int32_t limit_watts = (charging_mode == 0) ? SOLAR_GRID_TARGET : max_grid_power;
   int32_t error_watts = limit_watts - current_grid_power; // > 0: room left
-  float volts = (bd.voltage > 100) ? bd.voltage : 230.0;
   int ideal_amps = target_amps;
 
   if (error_watts < -GRID_DEADBAND) {
-    // Over the limit: jump down at once. The grid reflects what the car is
-    // really drawing, so the new setpoint is computed from the measured
-    // current; if we already asked for less, wait for the car to follow.
-    int wanted = (int)floorf(bd.current + error_watts / volts);
-    if (wanted < target_amps) ideal_amps = wanted;
+    // Over the limit: step down 1A per fresh sample, and only once the car
+    // has followed the previous step (otherwise the steps pile up and it
+    // drops further than needed). A single jump to the computed value was
+    // too abrupt, and not needed: the distributor tolerates minutes over the
+    // limit and the installation is sized well above the contracted power.
+    // Always from the setpoint: the measured current lags while the car is
+    // still climbing, and stepping from it made jumps like 19 -> 13A.
+    if (bd.current <= target_amps + 1) ideal_amps = target_amps - 1;
   } else if (error_watts > GRID_DEADBAND) {
-    // Room left: climb slowly, and only once the car has caught up with the
-    // previous setpoint (it may also be limiting itself, e.g. near full).
-    if (bd.current >= target_amps - 1) {
-      int step = (int)(error_watts / volts);
-      if (step > DLB_MAX_STEP_UP) step = DLB_MAX_STEP_UP;
-      if (step < 1) step = 1;
-      ideal_amps = target_amps + step;
-    }
+    // Room left: 1A up per fresh sample, and only once the car has caught up
+    // with the previous setpoint (it may also be limiting itself, e.g. near
+    // full). 2A steps overshot and hunted with the house loads swinging.
+    if (bd.current >= target_amps - 1) ideal_amps = target_amps + 1;
   }
 
   // 4. CLAMPING
@@ -251,9 +248,12 @@ void runSmartChargingLogic() {
   // 5. ACTUATION & SYNC
   // Resend the setpoint if the charger reports a very different current (a
   // lost UDP packet, or a self-restart at its own max), but not every second.
+  // Drawing MORE than asked is the dangerous side (seen: 27A with 19A asked,
+  // after the car restarted its session), so that one is resent sooner.
   static unsigned long lastSync = 0;
-  bool sync_needed = (abs(bd.current - target_amps) > 2) &&
-                     (millis() - lastSync > DLB_RESYNC_INTERVAL);
+  unsigned long sinceSync = millis() - lastSync;
+  bool sync_needed = (bd.current > target_amps + 2 && sinceSync > DLB_RESYNC_OVER) ||
+                     (abs(bd.current - target_amps) > 2 && sinceSync > DLB_RESYNC_INTERVAL);
 
   if (ideal_amps != target_amps || sync_needed) {
     Serial.printf("DLB: Grid %d, Limit %d | Adjusting %d -> %dA (Phys: %.1fA)\n",

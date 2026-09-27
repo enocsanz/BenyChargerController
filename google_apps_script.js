@@ -51,8 +51,8 @@ function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    appendRows(sheetFor(ss, 'Muestras', SAMPLE_HEADERS), data.samples || []);
-    appendRows(sheetFor(ss, 'Eventos', EVENT_HEADERS), data.events || []);
+    appendRows(sheetFor(ss, 'Muestras', SAMPLE_HEADERS), data.samples || [], 2); // date, time
+    appendRows(sheetFor(ss, 'Eventos', EVENT_HEADERS), data.events || [], 4);    // all columns
     return ContentService.createTextOutput("OK");
   } finally {
     lock.releaseLock();
@@ -71,10 +71,28 @@ function sheetFor(ss, name, headers) {
   return sheet;
 }
 
-function appendRows(sheet, rows) {
+// Rows already in the last DEDUP_ROWS are skipped: when the device does not
+// get the answer in time it resends the whole batch, which had been written.
+var DEDUP_ROWS = 300;
+
+// keyCols: leading text columns that identify a row (numbers are left out:
+// the sheet shows them with a decimal comma and they would never match).
+function appendRows(sheet, rows, keyCols) {
   if (!rows.length) return;
   var width = rows[0].length;
-  var start = sheet.getLastRow() + 1;
+  var last = sheet.getLastRow();
+  if (last > 1) {
+    var n = Math.min(DEDUP_ROWS, last - 1);
+    var seen = {};
+    sheet.getRange(last - n + 1, 1, n, keyCols).getDisplayValues().forEach(function (r) {
+      seen[r.join('|')] = true;
+    });
+    rows = rows.filter(function (r) {
+      return !seen[r.slice(0, keyCols).map(String).join('|')];
+    });
+    if (!rows.length) return;
+  }
+  var start = last + 1;
   // Dates and times stay as text: dd/mm/yyyy would otherwise be read with the
   // spreadsheet's locale and may swap day and month.
   sheet.getRange(start, 1, rows.length, 2).setNumberFormat('@');
@@ -90,8 +108,10 @@ function exportCsv(params) {
 
   var last = sheet.getLastRow();
   var n = Math.min(parseInt(params.rows || '20000', 10), last - 1);
-  var header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues();
-  var body = n > 0 ? sheet.getRange(last - n + 1, 1, n, sheet.getLastColumn()).getDisplayValues() : [];
+  // Raw values, not display ones: numbers keep a decimal point whatever the
+  // spreadsheet's locale (dates and times are stored as text anyway)
+  var header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues();
+  var body = n > 0 ? sheet.getRange(last - n + 1, 1, n, sheet.getLastColumn()).getValues() : [];
   var csv = header.concat(body).map(function (row) {
     return row.map(function (v) {
       v = String(v);

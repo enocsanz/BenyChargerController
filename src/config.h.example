@@ -28,7 +28,7 @@
 #define TERMO_IP "192.168.1.50"
 #define TERMO_LOCAL_KEY "YOUR_LOCAL_KEY16"
 #define TERMO_MAX_PRICE 0.20     // E/kWh: above this the heater is cut (AUTO)
-#define TERMO_DEFAULT_POWER 2000 // W, until the relay has measured it
+#define TERMO_DEFAULT_POWER 2600 // W, until the relay has measured it (2.55-2.58 kW measured)
 #define CONTRACTED_POWER 4600    // W, contracted power (overload protection)
 
 // Pool pump + chlorinator: Tongou relay over Tuya local (protocol 3.4).

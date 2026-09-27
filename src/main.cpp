@@ -17,6 +17,11 @@
 // Logic Constants
 // Dead band around the DLB target, to avoid amp jitter (W)
 const int32_t GRID_DEADBAND = 200;
+// Max amps added per fresh grid sample. Going up is slow on purpose, going
+// down is a single jump to the computed value.
+const int DLB_MAX_STEP_UP = 2;
+// Resend the setpoint at most this often when the charger does not follow it
+const unsigned long DLB_RESYNC_INTERVAL = 10000;
 
 // Queues a message for the Telegram task. Never blocks: the actual HTTPS
 // request is issued from loopTelegram().
@@ -162,7 +167,7 @@ void setup() {
 void runSmartChargingLogic() {
   // PURE Dynamic Load Balancing (DLB) Logic
   // Goal: Keep grid power at the mode's target by modulating the charge current
-  // Action: Adjust Amps (BENY_MIN_AMPS - BENY_MAX_AMPS), 1A per second
+  // Action: Adjust Amps (BENY_MIN_AMPS - BENY_MAX_AMPS) on each fresh grid sample
   //
   // There is NO automatic pause: the charger runs in "Plug and Charge" and
   // ignores a STOP (the car restarts it, and on that self-restart it uses the
@@ -192,17 +197,37 @@ void runSmartChargingLogic() {
     return;
   }
 
-  // --- STEP-BY-STEP DLB (±1A per second) ---
+  // --- DLB: act only on a fresh grid sample ---
+  // The grid reading lags (1s, or 10s when the inverter is slow) and so does
+  // the car, which takes seconds to follow a new setpoint. Stepping every
+  // second on a repeated reading piled up adjustments and made the grid swing
+  // between ~2.7kW and ~5.9kW around a 4.6kW limit.
+  static uint32_t lastSample = 0;
+  if (grid_sample_count == lastSample) {
+    return;
+  }
+  lastSample = grid_sample_count;
+
   int32_t limit_watts = (charging_mode == 0) ? SOLAR_GRID_TARGET : max_grid_power;
+  int32_t error_watts = limit_watts - current_grid_power; // > 0: room left
+  float volts = (bd.voltage > 100) ? bd.voltage : 230.0;
   int ideal_amps = target_amps;
 
-  // Hysteresis: Skip adjustment if within GRID_DEADBAND of limit to avoid jitter
-  if (current_grid_power > (limit_watts + GRID_DEADBAND)) {
-    // Over the limit -> Reduce by 1A
-    ideal_amps = target_amps - 1;
-  } else if (current_grid_power < (limit_watts - GRID_DEADBAND)) {
-    // Under the limit -> Increase by 1A
-    ideal_amps = target_amps + 1;
+  if (error_watts < -GRID_DEADBAND) {
+    // Over the limit: jump down at once. The grid reflects what the car is
+    // really drawing, so the new setpoint is computed from the measured
+    // current; if we already asked for less, wait for the car to follow.
+    int wanted = (int)floorf(bd.current + error_watts / volts);
+    if (wanted < target_amps) ideal_amps = wanted;
+  } else if (error_watts > GRID_DEADBAND) {
+    // Room left: climb slowly, and only once the car has caught up with the
+    // previous setpoint (it may also be limiting itself, e.g. near full).
+    if (bd.current >= target_amps - 1) {
+      int step = (int)(error_watts / volts);
+      if (step > DLB_MAX_STEP_UP) step = DLB_MAX_STEP_UP;
+      if (step < 1) step = 1;
+      ideal_amps = target_amps + step;
+    }
   }
 
   // 4. CLAMPING
@@ -210,14 +235,18 @@ void runSmartChargingLogic() {
   if (ideal_amps > BENY_MAX_AMPS) ideal_amps = BENY_MAX_AMPS;
 
   // 5. ACTUATION & SYNC
-  // Sync if reported physical current is significantly different from target
-  bool sync_needed = (abs(bd.current - target_amps) > 2);
+  // Resend the setpoint if the charger reports a very different current (a
+  // lost UDP packet, or a self-restart at its own max), but not every second.
+  static unsigned long lastSync = 0;
+  bool sync_needed = (abs(bd.current - target_amps) > 2) &&
+                     (millis() - lastSync > DLB_RESYNC_INTERVAL);
 
   if (ideal_amps != target_amps || sync_needed) {
     Serial.printf("DLB: Grid %d, Limit %d | Adjusting %d -> %dA (Phys: %.1fA)\n",
                   current_grid_power, limit_watts, target_amps, ideal_amps, bd.current);
     target_amps = ideal_amps;
     benySetCurrent(target_amps);
+    lastSync = millis();
   }
 }
 

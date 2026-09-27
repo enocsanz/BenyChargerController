@@ -10,6 +10,7 @@ ModbusIP mb;
 // Data Globals
 int32_t current_grid_power = 0;
 int32_t current_pv_power = 0;
+uint32_t grid_sample_count = 0;
 uint16_t gridPowerBuf[2]; // Buffer for Grid Power registers
 uint16_t pvPowerBuf[2];   // Buffer for PV Power registers
 
@@ -59,6 +60,7 @@ bool cbReadGridPower(Modbus::ResultCode event, uint16_t transactionId, void *dat
     } else {
       current_grid_power = raw;
     }
+    grid_sample_count++;
     errorCount = 0;
   } else {
     Serial.printf("Huawei: Modbus Error Grid 0x%02X\n", event);

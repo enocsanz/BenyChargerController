@@ -58,7 +58,7 @@ void handleNewMessages(int numNewMessages) {
       msg += "MODOS DE CARGA:\n";
       msg += "🔋 SOLAR: /solar - Carga con excedentes, ajustando el amperaje para no importar de red.\n";
       msg += "⚖️ BALANCEO: /balanceo - Carga dinamica aprovechando hasta el limite de red.\n\n";
-      msg += "En ambos modos el amperaje sube y baja 1A/s entre " + String(BENY_MIN_AMPS) +
+      msg += "En ambos modos el amperaje se ajusta entre " + String(BENY_MIN_AMPS) +
              "A y " + String(BENY_MAX_AMPS) + "A. El minimo de " + String(BENY_MIN_AMPS) +
              "A es el suelo del cargador: si no hay sol, ese consumo se toma de la red.\n\n";
       msg += "AJUSTES: \n";

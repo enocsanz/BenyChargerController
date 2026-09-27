@@ -44,7 +44,7 @@ El objetivo principal es maximizar el autoconsumo solar, proteger la instalació
 
 **Modo por defecto:** Solar (ID 0).
 
-En ambos modos el control es el mismo: **solo se modula el amperaje**, entre `BENY_MIN_AMPS` (6A) y `BENY_MAX_AMPS` (32A), a razón de ±1A/s. Lo único que cambia entre modos es el objetivo de potencia de red al que apunta el DLB.
+En ambos modos el control es el mismo: **solo se modula el amperaje**, entre `BENY_MIN_AMPS` (6A) y `BENY_MAX_AMPS` (32A): baja de golpe si se pasa del objetivo y sube de 1 en 1 o de 2 en 2 A cuando hay margen. Lo único que cambia entre modos es el objetivo de potencia de red al que apunta el DLB.
 
 ## El mínimo de 6A es el suelo del sistema
 
@@ -57,11 +57,22 @@ Consecuencias que hay que tener presentes:
 - Cuando el sistema está en el suelo de 6A lo señala explícitamente: la fila de amperios de la pantalla pasa a amarillo y `/status` incluye un aviso.
 - Si quieres un corte real de la carga, hay que **desactivar Plug and Charge en el propio cargador**; desde el M5Dial no es posible garantizarlo.
 
-## Control Dinámico por Pasos e Histéresis (DLB)
+## Control Dinámico (DLB): baja rápido, sube despacio
 
-Para evitar oscilaciones bruscas del amperaje y proteger los contactores del cargador, el algoritmo DLB ajusta la corriente de carga a razón de **±1 Amperio por segundo**. 
+El DLB compara la potencia de red con el objetivo del modo y ajusta el amperaje del Beny. Dos retardos condicionan el diseño:
 
-Además, implementa un margen de **histéresis (zona muerta) de 200W** en torno al objetivo. Si la lectura de la red varía menos de 200W respecto a la meta, el cargador asimila ese pequeño margen temporal sin emitir órdenes continuas de ajuste.
+- **La lectura de red llega con retraso**: cada ~1 s, o cada 10 s si el inversor responde lento (throttling para no colgar el EW11).
+- **El coche tarda varios segundos** en seguir un nuevo objetivo de amperaje.
+
+La versión anterior ajustaba ±1A cada segundo aunque la lectura fuese la misma, acumulando correcciones antes de ver su efecto. Con un límite de 4,6 kW la red oscilaba entre ~2,7 y ~5,9 kW. Ahora:
+
+1. **Solo actúa con una muestra nueva de red** (`grid_sample_count` en `HuaweiTask`). Si el dato no ha cambiado, no hace nada.
+2. **Por encima del objetivo baja de golpe**: calcula el amperaje que corresponde a partir de la **corriente real** del cargador (`corriente real + exceso / tensión`), no del objetivo anterior. Si ya se había pedido menos, espera a que el coche lo siga.
+3. **Por debajo del objetivo sube despacio**: como mucho `DLB_MAX_STEP_UP` (2A) por muestra, y solo cuando el coche ha alcanzado el objetivo anterior (si el coche se limita solo, por ejemplo cerca del 100 %, no se sigue subiendo).
+4. **Zona muerta de 200W** (`GRID_DEADBAND`) en torno al objetivo: dentro de ella no se emiten órdenes.
+5. **Resincronización limitada**: si la corriente real difiere más de 2A del objetivo (paquete UDP perdido, rearranque del cargador a su máximo), se reenvía el objetivo como mucho cada 10 s.
+
+Medido con el coche cargando y límite de 4,6 kW: el tiempo por encima de 5,2 kW bajó del 16 % al 1 % y la potencia media de carga subió de ~3,1 a ~3,6 kW. La variación que queda se debe sobre todo a los consumos de la casa, que por sí solos oscilan ±1 kW.
 
 ## Reconexión WiFi
 
@@ -168,7 +179,7 @@ CargadorBenyV2/
 |-------|----------|-------------|
 | Huawei (Modbus) | 1s | Lectura de potencia de red y solar. |
 | Beny (UDP) | 2s | Lectura de estado del cargador. |
-| Lógica DLB | 1s | Cálculo y ajuste de amperaje continuo (±1A). |
+| Lógica DLB | 1s (actúa solo con muestra nueva de red) | Ajuste de amperaje: baja de golpe, sube hasta 2A por muestra. |
 | Telegram | 2s | Polling de mensajes entrantes. |
 | Pantalla | 500ms | Refresco de la interfaz visual. |
 | Google Sheets | 10s (check) / 1h (envío) | Envío de datos cada hora en punto. |

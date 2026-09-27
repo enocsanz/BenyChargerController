@@ -6,7 +6,7 @@
 
 #include "config.h"
 #include <Arduino.h>
-#include <M5StickCPlus.h>
+#include <M5Dial.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <esp_task_wdt.h>
@@ -26,11 +26,20 @@ extern void sendTelegramNotification(String msg);
 unsigned long lastLogicRun = 0;
 const unsigned long logicInterval = 1000; // Check every 1 second (Faster DLB)
 
-// ISR for Button A
-volatile bool buttonPressed = false;
-void IRAM_ATTR isrButtonA() {
-  buttonPressed = true;
-} // Kept for potential future use or debouncing
+// --- M5Dial UI ---
+// Round 240x240 GC9A01. Everything is drawn into an off-screen canvas and
+// pushed in one go, so the 0.5s refresh does not flicker. 8-bit colour keeps
+// it at ~57KB of RAM (the StampS3A has no PSRAM and TLS needs its share).
+M5Canvas canvas(&M5Dial.Display);
+long lastEncoderPos = 0;
+
+// Boot log: a few centred lines, since the round screen has no usable corners
+int bootLine = 0;
+void bootMsg(const String &msg, uint16_t color = TFT_WHITE) {
+  M5Dial.Display.setTextColor(color, TFT_BLACK);
+  M5Dial.Display.drawCenterString(msg, 120, 50 + bootLine * 24);
+  bootLine++;
+}
 
 #include <Preferences.h>
 
@@ -64,7 +73,10 @@ void saveMaxGridPower(int watts) {
 }
 
 void setup() {
-  M5.begin();
+  // M5Unified detects the Dial and holds GPIO46 high (power latch) by itself.
+  auto cfg = M5.config();
+  M5Dial.begin(cfg, true, false); // encoder ON, RFID OFF
+  M5Dial.Display.setBrightness(128);
 
   // WDT Init
   esp_task_wdt_init(WDT_TIMEOUT, true); // Enable panic (reset) on timeout
@@ -75,14 +87,13 @@ void setup() {
   charging_mode = preferences.getInt("mode", 0); // Default 0
   max_grid_power = preferences.getInt("limit", DEFAULT_MAX_GRID_POWER);
   preferences.end();
-  M5.Lcd.setRotation(3);
-  M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setTextSize(2); // Revert to 2 (Size 3 too big)
-  M5.Lcd.println("Init Dual DLB...");
+  M5Dial.Display.fillScreen(TFT_BLACK);
+  M5Dial.Display.setFont(&fonts::FreeSansBold9pt7b);
+  bootMsg("Beny DLB - M5Dial");
 
-  // Attach Interrupt for Button A (GPIO 37 on M5StickC Plus)
-  pinMode(37, INPUT_PULLUP); // Ensure pullup
-  attachInterrupt(digitalPinToInterrupt(37), isrButtonA, FALLING);
+  canvas.setColorDepth(8);
+  canvas.createSprite(240, 240);
+  lastEncoderPos = M5Dial.Encoder.read();
 
   Serial.begin(115200);
 
@@ -91,23 +102,20 @@ void setup() {
   WiFi.setSleep(false); // Modem sleep adds latency to the Beny UDP / Modbus polls
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  M5.Lcd.print("WiFi");
   unsigned long wifiStart = millis();
-  int dots = 0;
   while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 20000) {
     delay(500);
-    if (++dots <= 16) M5.Lcd.print("."); // Bounded: never push the screen around
-    esp_task_wdt_reset();                // Prevent WDT reset while connecting
+    esp_task_wdt_reset(); // Prevent WDT reset while connecting
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    M5.Lcd.println(" OK");
+    bootMsg("WiFi OK", TFT_GREEN);
   } else {
     // Do NOT reboot here. Rebooting on a failed boot-time connect turned a
     // router outage into an endless boot loop (20s of dots -> restart -> 20s
     // of dots...), which is what the "black screen filling with dots" is.
     // Boot anyway and let loop() own reconnection.
-    M5.Lcd.println(" SIN RED");
+    bootMsg("WiFi: SIN RED", TFT_RED);
     Serial.println("WiFi: Sin conexion al arrancar. Continuando, loop() reintentara.");
   }
 
@@ -119,20 +127,18 @@ void setup() {
   tzset();
 
   if (WiFi.status() == WL_CONNECTED) {
-    M5.Lcd.print("Time");
     struct tm timeinfo;
     unsigned long ntpStart = millis();
     bool timeSet = false;
     while (!(timeSet = getLocalTime(&timeinfo, 1000))) {
       if (millis() - ntpStart > 10000) {
         Serial.println("\nNTP: Timeout, continuing without correct time.");
-        M5.Lcd.print(" FAIL");
+        bootMsg("Hora: FALLO", TFT_RED);
         break;
       }
-      M5.Lcd.print(".");
       esp_task_wdt_reset(); // Prevent WDT reset during NTP sync
     }
-    if (timeSet) M5.Lcd.println(" OK");
+    if (timeSet) bootMsg("Hora OK", TFT_GREEN);
   }
 
   // Init Tasks
@@ -218,105 +224,88 @@ void runSmartChargingLogic() {
 // --- UI Logic ---
 bool redraw = true;
 
+// Round screen layout (240x240). Rows are centred; the usable width shrinks
+// towards the top and bottom edges, so the outer rows carry the shortest text.
+// Same colour rules as the M5StickC Plus version.
 void drawStatusScreen(bool fullClear) {
-  if (fullClear) {
-    M5.Lcd.fillScreen(BLACK);
-  }
-  M5.Lcd.setCursor(0, 0);
+  (void)fullClear; // The canvas is always redrawn from scratch
+  if (!screenAwake) return; // Nothing to show while the backlight is off
+
+  canvas.fillSprite(TFT_BLACK);
+  canvas.setTextDatum(middle_center);
+  char buf[40];
 
   // Price (Green < th, Orange < th+0.02, else Red)
   float price = getCurrentPrice();
-  M5.Lcd.setTextColor(WHITE, BLACK);
-  M5.Lcd.print("P: ");
+  uint16_t c;
+  if (price < max_price_threshold) c = TFT_GREEN;
+  else if (price < (max_price_threshold + 0.02)) c = TFT_ORANGE;
+  else c = TFT_RED;
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  canvas.setTextColor(c);
+  snprintf(buf, sizeof(buf), "%.3f EUR", price);
+  canvas.drawString(buf, 120, 34);
 
-  if (price < max_price_threshold) {
-    M5.Lcd.setTextColor(GREEN, BLACK);
-  } else if (price < (max_price_threshold + 0.02)) {
-    M5.Lcd.setTextColor(ORANGE, BLACK);
-  } else {
-    M5.Lcd.setTextColor(RED, BLACK);
-  }
-  M5.Lcd.printf("%.3f          \n", price);
-
-  // Grid
-  if (current_grid_power < 0) {
-    M5.Lcd.setTextColor(GREEN, BLACK); // Exporting
-  } else if (current_grid_power < 5000) {
-    M5.Lcd.setTextColor(ORANGE, BLACK); // Importing < 5kW
-  } else {
-    M5.Lcd.setTextColor(RED, BLACK); // Importing > 5kW
-  }
+  // Grid: exporting green, <5kW orange, else red
+  if (current_grid_power < 0) c = TFT_GREEN;
+  else if (current_grid_power < 5000) c = TFT_ORANGE;
+  else c = TFT_RED;
+  canvas.setTextColor(c);
   float grid_kw = (float)current_grid_power / 1000.0;
-  M5.Lcd.printf("Grid: %s%.3f/%.1f \n", (grid_kw > 0 ? "+" : ""), grid_kw,
-                (float)max_grid_power / 1000.0);
+  snprintf(buf, sizeof(buf), "Red %s%.2f/%.1f", (grid_kw > 0 ? "+" : ""), grid_kw,
+           (float)max_grid_power / 1000.0);
+  canvas.drawString(buf, 120, 60);
 
   // Solar
-  if (current_pv_power > 50) { // Producing > 50W
-    M5.Lcd.setTextColor(GREEN, BLACK);
-  } else {
-    M5.Lcd.setTextColor(ORANGE, BLACK);
-  }
-  M5.Lcd.printf("Solar: %.3fkW     \n", (float)current_pv_power / 1000.0);
+  canvas.setTextColor(current_pv_power > 50 ? TFT_GREEN : TFT_ORANGE);
+  snprintf(buf, sizeof(buf), "Solar %.2f kW", (float)current_pv_power / 1000.0);
+  canvas.drawString(buf, 120, 86);
 
-  // Beny Display (3 Lines)
+  // Beny power, big in the centre: Standby/0W green, <=2kW orange, >2kW red
   BenyData bd = getBenyData();
+  if (bd.power < 100) c = TFT_GREEN;
+  else if (bd.power <= 2000) c = TFT_ORANGE;
+  else c = TFT_RED;
+  canvas.setFont(&fonts::FreeSansBold18pt7b);
+  canvas.setTextColor(c);
+  snprintf(buf, sizeof(buf), "%.2f kW", bd.power / 1000.0);
+  canvas.drawString(buf, 120, 122);
 
-  // Color Logic: Standby/0W(Green), <=2kW(Orange), >2kW(Red)
-  if (bd.power < 100) { // Approx 0W
-    M5.Lcd.setTextColor(GREEN, BLACK);
-  } else if (bd.power <= 2000) {
-    M5.Lcd.setTextColor(ORANGE, BLACK);
-  } else {
-    M5.Lcd.setTextColor(RED, BLACK);
-  }
-
-  // Line 1: Header + Power
-  M5.Lcd.printf("Beny: %.3fkW\n", bd.power / 1000.0);
-
-  // Line 2: Mode
+  // Mode
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
   if (charging_mode == 0) {
-    M5.Lcd.setTextColor(GREEN, BLACK);
-    M5.Lcd.printf("Mode: SOLAR   \n");
-  } else if (charging_mode == 1) {
-    M5.Lcd.setTextColor(ORANGE, BLACK);
-    M5.Lcd.printf("Mode: BALANCEO\n");
+    canvas.setTextColor(TFT_GREEN);
+    canvas.drawString("SOLAR", 120, 156);
+  } else {
+    canvas.setTextColor(TFT_ORANGE);
+    canvas.drawString("BALANCEO", 120, 156);
   }
 
   // Charge current: target vs. what the charger actually reports.
   // At BENY_MIN_AMPS the DLB has nothing left to give back, so it is flagged.
-  if (target_amps <= BENY_MIN_AMPS) {
-    M5.Lcd.setTextColor(YELLOW, BLACK); // At the floor, cannot reduce further
-  } else {
-    M5.Lcd.setTextColor(GREEN, BLACK);
-  }
-  M5.Lcd.printf("Amp: %2dA (%2.0fA)   \n", target_amps, bd.current);
+  canvas.setTextColor(target_amps <= BENY_MIN_AMPS ? TFT_YELLOW : TFT_GREEN);
+  snprintf(buf, sizeof(buf), "%dA (%.0fA)", target_amps, bd.current);
+  canvas.drawString(buf, 120, 180);
 
-  // Line 3: Status (Pad with spaces to overwrite previous long text)
-  // "Stat: 1234567890123456" (Max ~20 chars)
-  char statBuf[30];
-  snprintf(statBuf, sizeof(statBuf), "Stat: %s                ",
-           bd.status.c_str());
-  M5.Lcd.printf("%.20s\n", statBuf); // Limit to screen width
+  // Status (short row near the bottom edge: truncate long states)
+  canvas.setTextColor(TFT_WHITE);
+  snprintf(buf, sizeof(buf), "%.12s", bd.status.c_str());
+  canvas.drawString(buf, 120, 204);
 
-  // WiFi: only shown when down, so an outage is obvious instead of looking
-  // like a frozen device showing stale numbers
+  // WiFi down: red ring around the bezel, so an outage is obvious instead of
+  // looking like a frozen device showing stale numbers
   if (WiFi.status() != WL_CONNECTED) {
-    M5.Lcd.setTextColor(RED, BLACK);
-    M5.Lcd.printf("SIN WIFI - reintent.\n");
-  } else {
-    M5.Lcd.printf("                    \n");
+    canvas.fillArc(120, 120, 119, 113, 0, 360, TFT_RED);
   }
 
-  // Reset to White
-  M5.Lcd.setTextColor(WHITE, BLACK);
+  canvas.pushSprite(0, 0);
 }
 
 void wakeScreen() {
   lastInteractionTime = millis();
   if (!screenAwake) {
-    M5.Axp.SetLDO2(true);        // Power on LDO2 (Backlight)
-    M5.Axp.ScreenBreath(100);    // Max brightness (M5StickC-Plus uses 0-100)
-    M5.Lcd.writecommand(0x29);  // ST7789 DISPON
+    M5Dial.Display.wakeup();
+    M5Dial.Display.setBrightness(128);
     screenAwake = true;
     redraw = true;
     Serial.println("Screen: Wake up");
@@ -325,9 +314,8 @@ void wakeScreen() {
 
 void sleepScreen() {
   if (screenAwake) {
-    M5.Axp.ScreenBreath(0);      // Dims to zero
-    M5.Axp.SetLDO2(false);       // Cuts power to backlight
-    M5.Lcd.writecommand(0x28);  // ST7789 DISPOFF
+    M5Dial.Display.setBrightness(0);
+    M5Dial.Display.sleep();
     screenAwake = false;
     Serial.println("Screen: Sleep");
   }
@@ -337,17 +325,21 @@ void loop() {
   // Reset WDT every loop
   esp_task_wdt_reset();
 
-  // Read buttons FIRST so wake-up is immediate
-  M5.update();
+  // Read inputs FIRST so wake-up is immediate
+  M5Dial.update();
 
-  // Button B: dedicated wake-up only
-  if (M5.BtnB.wasPressed()) {
+  // Encoder turn or screen touch: wake-up only (for now; later: Tuya menu)
+  long encoderPos = M5Dial.Encoder.read();
+  if (encoderPos != lastEncoderPos) {
+    lastEncoderPos = encoderPos;
+    wakeScreen();
+  }
+  if (M5Dial.Touch.getCount() > 0) {
     wakeScreen();
   }
 
-  // Button A: wake-up + mode change (only if already awake)
-  if (M5.BtnA.wasPressed() || buttonPressed) {
-    buttonPressed = false;
+  // Button (pressing the dial, GPIO42): wake-up + mode change (only if awake)
+  if (M5Dial.BtnA.wasPressed()) {
     bool wasAwake = screenAwake;
     wakeScreen(); // Always wake
 
@@ -358,7 +350,7 @@ void loop() {
       Serial.printf("Button A Pressed: Mode set to %d\n", charging_mode);
 
       String modeStr = (charging_mode == 0) ? "SOLAR" : "BALANCEO";
-      sendTelegramNotification("🔘 M5Stick Botón: Modo cambiado a " + modeStr);
+      sendTelegramNotification("🔘 M5Dial Botón: Modo cambiado a " + modeStr);
     }
   }
 

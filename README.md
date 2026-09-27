@@ -1,8 +1,10 @@
 # CargadorBenyV2 — Control Inteligente de Carga EV
 
-Sistema de control de carga para vehículos eléctricos basado en **M5StickC Plus (ESP32)**, diseñado para gestionar un cargador **Beny** en combinación con un inversor solar **Huawei** y datos de precios eléctricos del mercado español (PVPC/ESIOS).
+Sistema de control de carga para vehículos eléctricos basado en **M5Stack Dial V1.1 (ESP32-S3)**, diseñado para gestionar un cargador **Beny** en combinación con un inversor solar **Huawei** y datos de precios eléctricos del mercado español (PVPC/ESIOS).
 
 El objetivo principal es maximizar el autoconsumo solar, proteger la instalación eléctrica y permitir el control remoto total vía **Telegram**.
+
+> La versión anterior para **M5StickC Plus** está congelada en la etiqueta git [`v1-m5stickcplus`](../../tree/v1-m5stickcplus).
 
 ## Mejoras de Estabilidad (Última versión)
 
@@ -20,11 +22,11 @@ El objetivo principal es maximizar el autoconsumo solar, proteger la instalació
 ┌─────────────┐     Modbus TCP     ┌──────────────────┐
 │  Huawei     │◄──────────────────►│                  │
 │  Inversor   │  (Grid + PV data)  │                  │
-└─────────────┘                    │   M5StickC Plus  │
-                                   │     (ESP32)      │
+└─────────────┘                    │   M5Stack Dial   │
+                                   │    (ESP32-S3)    │
 ┌─────────────┐     UDP/TCP        │                  │
 │  Beny       │◄──────────────────►│  - DLB Logic     │
-│  Cargador   │  (Control carga)   │  - LCD Display   │
+│  Cargador   │  (Control carga)   │  - Pantalla/Dial │
 └─────────────┘                    │  - Telegram Bot  │
                                    │  - Google Sheets │
 ┌─────────────┐     HTTPS          │  - ESIOS/PVPC   │
@@ -52,8 +54,8 @@ Consecuencias que hay que tener presentes:
 
 - El consumo mínimo del cargador mientras hay un coche enchufado es **6A (~1.4kW)**. Si no hay sol, ese consumo se toma de la red incluso en modo Solar.
 - **Configura `/set_limit` contando con ese consumo residual.** El límite debe dejar margen para los 6A del cargador por debajo de tu potencia contratada; el DLB no puede bajar de ahí.
-- Cuando el sistema está en el suelo de 6A lo señala explícitamente: en amarillo en la pantalla (línea `Amp:`) y con un aviso en `/status`.
-- Si quieres un corte real de la carga, hay que **desactivar Plug and Charge en el propio cargador**; desde el M5Stick no es posible garantizarlo.
+- Cuando el sistema está en el suelo de 6A lo señala explícitamente: la fila de amperios de la pantalla pasa a amarillo y `/status` incluye un aviso.
+- Si quieres un corte real de la carga, hay que **desactivar Plug and Charge en el propio cargador**; desde el M5Dial no es posible garantizarlo.
 
 ## Control Dinámico por Pasos e Histéresis (DLB)
 
@@ -75,17 +77,37 @@ Puntos clave del diseño:
 
 - **El arranque nunca reinicia por falta de WiFi.** Antes, un fallo de conexión en `setup()` provocaba `ESP.restart()` a los 30s, y con el router caído eso era un **bucle de reinicio infinito**: 30s de puntos en pantalla, reinicio, otros 30s de puntos… El equipo nunca llegaba al bucle principal. Ese es el síntoma de "pantalla negra llenándose de puntos".
 - **El umbral de reinicio es largo (15 min) a propósito.** Reiniciar no arregla un router que sigue caído; solo tira la hora de funcionamiento y esconde el problema.
-- **Las tareas de red se saltan sin enlace.** Telegram, ESIOS, Google Sheets, Huawei y Beny no se ejecutan mientras no hay WiFi: intentar conexiones imposibles consume el ciclo (un handshake TLS puede tardar segundos) y dejaba sin tiempo a la propia lógica de reconexión y a los botones.
+- **Las tareas de red se saltan sin enlace.** Telegram, ESIOS, Google Sheets, Huawei y Beny no se ejecutan mientras no hay WiFi: intentar conexiones imposibles consume el ciclo (un handshake TLS puede tardar segundos) y dejaba sin tiempo a la propia lógica de reconexión y a los controles.
 - **El DLB también se detiene sin enlace**, porque las lecturas de Beny y Huawei estarían obsoletas y ninguna orden llegaría al cargador.
-- La pantalla muestra `SIN WIFI - reintent.` en rojo mientras dura la caída, para no confundir una desconexión con un equipo colgado mostrando datos viejos.
+- La pantalla muestra un **anillo rojo en el borde** mientras dura la caída, para no confundir una desconexión con un equipo colgado mostrando datos viejos. Al arrancar sin red aparece `WiFi: SIN RED`.
 
-## Gestión de Pantalla (Salvapantallas)
+## Pantalla y Controles (M5Dial)
 
-- La pantalla se apaga completamente tras **2 minutos** de inactividad (comando ST7789 DISPOFF) para proteger el panel.
-- Se despierta inmediatamente al:
-  - Pulsar el **Botón B** (lateral) — Acción dedicada: solo despierta la pantalla.
-  - Pulsar el **Botón A** (frontal) — Si está dormida, despierta; si ya está encendida, cicla el modo de carga.
-  - Cambiar el modo remotamente vía Telegram.
+La pantalla es redonda (GC9A01, 240×240). Todo se dibuja en un *canvas* fuera de pantalla de 8 bits (~57 KB de RAM, el StampS3A no tiene PSRAM) y se vuelca de una vez cada 500 ms, sin parpadeo. Las filas van centradas y las de los extremos llevan el texto más corto, porque el ancho útil se estrecha hacia arriba y abajo.
+
+| Fila | Contenido | Color |
+|------|-----------|-------|
+| 1 | Precio PVPC (€/kWh) | Verde < umbral, naranja < umbral + 0,02, rojo por encima |
+| 2 | Red: potencia actual / límite (kW) | Verde exportando, naranja < 5 kW, rojo ≥ 5 kW |
+| 3 | Producción solar (kW) | Verde > 50 W, naranja en otro caso |
+| 4 (grande) | Potencia de carga del Beny (kW) | Verde ~0 W, naranja ≤ 2 kW, rojo > 2 kW |
+| 5 | Modo: `SOLAR` / `BALANCEO` | Verde / naranja |
+| 6 | Amperaje objetivo (real) | Amarillo en el suelo de 6A, verde en otro caso |
+| 7 | Estado del cargador (truncado a 12 caracteres) | Blanco |
+| Borde | Anillo rojo | Solo sin WiFi |
+
+### Controles
+
+| Acción | Efecto |
+|--------|--------|
+| **Girar el dial** | Despierta la pantalla. |
+| **Tocar la pantalla** | Despierta la pantalla. |
+| **Pulsar el dial** | Si la pantalla está dormida, la despierta; si ya está encendida, alterna el modo Solar ↔ Balanceo (y avisa por Telegram). |
+
+### Salvapantallas
+
+- La pantalla se apaga tras **2 minutos** de inactividad (brillo a 0 y *sleep* del panel).
+- Se despierta con cualquiera de los controles anteriores o al cambiar el modo remotamente vía Telegram.
 
 ## Comandos de Telegram
 
@@ -114,7 +136,7 @@ Puntos clave del diseño:
 ### Notificaciones Automáticas
 El sistema envía mensajes proactivos a Telegram cuando:
 - Se inicia el sistema (indicando el modo activo).
-- Se cambia de modo mediante el botón físico del M5Stick.
+- Se cambia de modo pulsando el dial del M5Dial.
 
 Las notificaciones **no se envían desde el punto donde se generan**: se encolan (hasta 4) y `loopTelegram()` entrega una por ciclo de polling. `bot.sendMessage()` es una petición HTTPS bloqueante de varios segundos, y llamarla desde `setup()` o desde la lógica de control podía agotar el watchdog de 30s y reiniciar el equipo.
 
@@ -129,13 +151,14 @@ CargadorBenyV2/
 │   ├── HuaweiTask.h        # Interfaz del inversor Huawei (grid + PV power)
 │   └── TelegramTask.h      # Interfaz del bot de Telegram
 ├── src/
-│   ├── main.cpp            # Setup, loop, DLB logic, UI, botones, salvapantallas
+│   ├── main.cpp            # Setup, loop, DLB logic, UI, dial/táctil, salvapantallas
 │   ├── BenyTask.cpp        # Comunicación UDP con el cargador Beny
 │   ├── HuaweiTask.cpp      # Lectura Modbus TCP del inversor Huawei
 │   ├── TelegramTask.cpp    # Bot de Telegram (comandos + notificaciones)
 │   ├── EsiosTask.cpp       # Consulta de precios PVPC vía API ESIOS
 │   ├── GoogleSheetsTask.cpp# Envío horario de datos a Google Sheets
-│   ├── config.h            # Credenciales y constantes de configuración
+│   ├── TuyaLocal.h         # Borrador de interfaz Tuya (aún sin uso)
+│   ├── config.h.example    # Plantilla de config.h (credenciales y constantes)
 └── platformio.ini          # Configuración de PlatformIO
 ```
 
@@ -147,7 +170,7 @@ CargadorBenyV2/
 | Beny (UDP) | 2s | Lectura de estado del cargador. |
 | Lógica DLB | 1s | Cálculo y ajuste de amperaje continuo (±1A). |
 | Telegram | 2s | Polling de mensajes entrantes. |
-| Pantalla LCD | 500ms | Refresco de la interfaz visual. |
+| Pantalla | 500ms | Refresco de la interfaz visual. |
 | Google Sheets | 10s (check) / 1h (envío) | Envío de datos cada hora en punto. |
 | Precios ESIOS | Variable | Consulta diaria de precios PVPC. |
 
@@ -170,14 +193,16 @@ Cada hora en punto, el sistema envía un `GET` al Google Apps Script con los sig
 
 ## Hardware Necesario
 
-- **M5StickC Plus** (ESP32, pantalla LCD 135×240, AXP192, WiFi, botones A/B)
+- **M5Stack Dial V1.1** (StampS3A: ESP32-S3FN8, 8 MB de flash, sin PSRAM; pantalla redonda táctil 240×240, encoder rotativo con pulsador)
 - **Cargador Beny** con interfaz de red UDP (puerto 3333)
 - **Inversor Solar Huawei** con Smart Meter Modbus TCP (puerto 502)
+
+> ⚠️ **El inversor Huawei solo admite un cliente Modbus TCP a la vez.** Si hay otro equipo conectado (por ejemplo el M5StickC antiguo, Home Assistant…), el M5Dial conecta y el inversor corta la conexión al instante: en el log aparece `Connected successfully!` → `Lost Connection` y errores `0xE4`, y red y solar se quedan a 0.
 - **Red WiFi** con acceso a Internet (para Telegram, ESIOS, Google Sheets)
 
 ## Configuración Inicial
 
-1. **Editar `src/config.h`** con tus credenciales:
+1. **Copiar `src/config.h.example` a `src/config.h`** y rellenar tus credenciales:
    - `WIFI_SSID` / `WIFI_PASSWORD` — Red WiFi.
    - `BOT_TOKEN` / `CHAT_ID` — Token del bot de Telegram y tu Chat ID.
    - `BENY_IP` / `BENY_PIN` / `BENY_SERIAL` — Datos del cargador Beny.
@@ -187,8 +212,9 @@ Cada hora en punto, el sistema envía un `GET` al Google Apps Script con los sig
 
 2. **Compilar y cargar** con PlatformIO (por USB — no hay actualización OTA):
    ```bash
-   pio run -t upload
+   pio run -e m5dial -t upload
    ```
+   El Dial se programa por el USB nativo del ESP32-S3 (aparece como *Dispositivo serie USB*). Si no aparece ningún puerto — típicamente la primera vez, con el firmware de fábrica —, mantén pulsado el botón **G0** del StampS3 mientras conectas el cable para entrar en modo descarga.
 
 3. **Monitorizar** la salida serie:
    ```bash
@@ -204,19 +230,15 @@ Los siguientes valores se guardan en la memoria flash (NVS) del ESP32 y sobreviv
 | `mode` | int | Modo de carga activo (0, 1). |
 | `limit` | int | Objetivo de potencia de red del modo Balanceo (W). |
 
+En un equipo recién programado la NVS está vacía y el arranque muestra `nvs_open failed: NOT_FOUND`: es normal, se usan los valores por defecto hasta el primer guardado.
+
 Las claves `t_pause`, `t_resume` y `r_margin` de la pausa automática ya no se leen ni se escriben. Quedan huérfanas en la NVS de los equipos actualizados, sin efecto.
 
 ## Particiones de Flash (sin OTA)
 
-El proyecto **no incluye actualización OTA**: se carga siempre por USB. Eso permite usar un esquema de partición única en `platformio.ini`:
+El proyecto **no incluye actualización OTA**: se carga siempre por USB. La placa `m5stack-stamps3` usa `default_8MB.csv` (dos ranuras de aplicación de 3,3 MB), así que no hace falta un esquema propio: el firmware ocupa en torno al **34 %** de una ranura, con margen holgado para crecer.
 
-```ini
-board_build.partitions = huge_app.csv
-```
-
-El esquema por defecto reservaba **dos ranuras de aplicación de 1,25 MB** para que el OTA pudiera alternar entre ellas, y el firmware ocupaba el 83 % de una de ellas. Con una sola partición de 3 MB, el mismo firmware baja al **33 %**, dejando margen holgado para crecer.
-
-> ⚠️ Cambiar el esquema de particiones **exige una carga por USB** (no se puede migrar por red) y borra SPIFFS, que este proyecto no usa. La partición NVS mantiene offset y tamaño, así que el modo y el límite guardados sobreviven.
+`platformio.ini` activa además `-DARDUINO_USB_CDC_ON_BOOT=1`; sin esa opción, `Serial` no sale por el USB nativo del ESP32-S3 y el monitor serie queda mudo.
 
 ## Licencia
 

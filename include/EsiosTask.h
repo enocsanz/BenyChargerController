@@ -12,8 +12,10 @@ struct PriceState {
   float prices[24];
   bool valid[24];
   unsigned long lastUpdate;
+  int yday; // tm_yday the prices belong to, -1 = none yet
 
   PriceState() {
+    yday = -1;
     for (int i = 0; i < 24; i++) {
       prices[i] = 0.0;
       valid[i] = false;
@@ -27,5 +29,7 @@ extern PriceState esios_prices;
 void setupEsios();
 void loopEsios();
 float getCurrentPrice();
+// Today's price for an hour (0-23), -1 if unknown
+float getPriceAt(int hour);
 
 #endif

@@ -1,5 +1,6 @@
 #include "TelegramTask.h"
 #include "BenyTask.h"
+#include "PiscinaTask.h"
 #include "TermoTask.h"
 
 // #include "WeatherTask.h" REMOVED
@@ -70,7 +71,13 @@ void handleNewMessages(int numNewMessages) {
       msg += "/termo_auto - Corta por precio y por sobrecarga\n";
       msg += "/termo_on - Ignora el precio (sigue cortando por sobrecarga)\n";
       msg += "/termo_off - Apagado\n";
-      msg += "/set_termo_precio E/kWh - Precio a partir del cual se corta\n";
+      msg += "/set_termo_precio E/kWh - Precio a partir del cual se corta\n\n";
+      msg += "DEPURADORA (PISCINA):\n";
+      msg += "/piscina - Estado y horas de hoy\n";
+      msg += "/piscina_auto - Con sol, con maximo y minimo diarios\n";
+      msg += "/piscina_on - Encendida\n";
+      msg += "/piscina_off - Apagada\n";
+      msg += "/set_piscina_horas MAX MIN - Horas de este mes (ej: /set_piscina_horas 6 3)\n";
       bot.sendMessage(chat_id, msg, "");
     } else if (textLower == "/status") {
       String msg = "📊 ESTADO DEL SISTEMA \n\n";
@@ -103,6 +110,7 @@ void handleNewMessages(int numNewMessages) {
                "A): el DLB no puede bajar mas.\n";
       }
       msg += "\n" + termoStatusText() + "\n";
+      msg += "\n" + piscinaStatusText() + "\n";
 
       bot.sendMessage(chat_id, msg, "");
 
@@ -180,6 +188,33 @@ void handleNewMessages(int numNewMessages) {
         bot.sendMessage(chat_id, "Termo: se corta con precio > " + String(val, 3) + " E/kWh.", "");
       } else {
         bot.sendMessage(chat_id, "Valor invalido (E/kWh, entre 0 y 1, usa . para decimales)", "");
+      }
+    } else if (textLower == "/piscina") {
+      bot.sendMessage(chat_id, piscinaStatusText(), "");
+    } else if (textLower == "/piscina_auto" || textLower == "/piscina auto") {
+      setPiscinaMode(PISCINA_AUTO);
+      manual_logic_trigger = true;
+      bot.sendMessage(chat_id, "Depuradora: AUTO (con sol, maximo y minimo diarios).", "");
+    } else if (textLower == "/piscina_on" || textLower == "/piscina on") {
+      setPiscinaMode(PISCINA_ON);
+      manual_logic_trigger = true;
+      bot.sendMessage(chat_id, "Depuradora: ON. Vuelve con /piscina_auto.", "");
+    } else if (textLower == "/piscina_off" || textLower == "/piscina off") {
+      setPiscinaMode(PISCINA_OFF);
+      manual_logic_trigger = true;
+      bot.sendMessage(chat_id, "Depuradora: OFF. Vuelve con /piscina_auto.", "");
+    } else if (textLower.startsWith("/set_piscina_horas ")) {
+      String args = text.substring(19); // Length of "/set_piscina_horas "
+      args.trim();
+      int sp = args.indexOf(' ');
+      float maxH = args.substring(0, sp < 0 ? args.length() : sp).toFloat();
+      float minH = sp < 0 ? -1 : args.substring(sp + 1).toFloat();
+      if (sp > 0 && setPiscinaHours(maxH, minH)) {
+        bot.sendMessage(chat_id, "Depuradora: este mes maximo " + String(maxH, 1) +
+                                     " h y minimo " + String(minH, 1) + " h al dia.", "");
+      } else {
+        bot.sendMessage(chat_id, "Uso: /set_piscina_horas MAX MIN (horas, MIN <= MAX <= 24). "
+                                 "Ej: /set_piscina_horas 6 3", "");
       }
     } else if (textLower == "/off" || textLower == "/stop") {
       bot.sendMessage(chat_id, "❌ Comando /off desactivado (Modo 'Plug and Charge' activo en el cargador).", "");

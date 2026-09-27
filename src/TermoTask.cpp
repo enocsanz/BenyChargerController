@@ -38,7 +38,7 @@ void setupTermo() {
   termo_mode = p.getInt("t_mode", TERMO_AUTO);
   termo_max_price = p.getFloat("t_price", TERMO_MAX_PRICE);
   p.end();
-  relay.begin(TERMO_IP, TERMO_LOCAL_KEY);
+  relay.begin("Termo", TERMO_IP, TERMO_LOCAL_KEY, 35);
 }
 
 void setTermoMode(int mode) {

@@ -4,6 +4,7 @@
 #include "HuaweiTask.h"
 #include "TelegramTask.h"
 #include "TermoTask.h"
+#include "PiscinaTask.h"
 
 #include "config.h"
 #include <Arduino.h>
@@ -159,6 +160,7 @@ void setup() {
   setupEsios(); // Fetches price immediately
 
   setupTermo();
+  setupPiscina();
 
   // Force Logic run immediately
   lastLogicRun = millis() - logicInterval;
@@ -337,6 +339,24 @@ void drawStatusScreen(bool fullClear) {
   snprintf(buf, sizeof(buf), "%.2f kW", bd.power / 1000.0);
   canvas.drawString(buf, 120, 122);
 
+  // Pool pump, left of the big number: today's run hours. Sky blue running on
+  // solar, violet topping up at night, green max reached, grey waiting,
+  // white manual. Hidden without the relay.
+  PiscinaStatus ps = getPiscinaStatus();
+  if (ps.reason != PR_OFFLINE) {
+    switch (ps.reason) {
+    case PR_SOLAR: c = TFT_SKYBLUE; break;
+    case PR_FILL: c = TFT_VIOLET; break;
+    case PR_DONE: c = TFT_GREEN; break;
+    case PR_WAITING: c = TFT_DARKGREY; break;
+    default: c = TFT_WHITE; break;
+    }
+    canvas.setFont(&fonts::FreeSans9pt7b);
+    canvas.setTextColor(c);
+    snprintf(buf, sizeof(buf), "%.1fh", ps.hoursToday);
+    canvas.drawString(buf, 24, 122);
+  }
+
   // Mode
   canvas.setFont(&fonts::FreeSansBold9pt7b);
   if (charging_mode == 0) {
@@ -503,6 +523,7 @@ void loop() {
     loopBeny();
     loopEsios();
     loopTermo();
+    loopPiscina();
   }
 
   // --- SCREEN DISPATCHER (0.5s) ---
@@ -520,6 +541,7 @@ void loop() {
     manual_logic_trigger = false;
     runSmartChargingLogic();
     runTermoLogic();
+    runPiscinaLogic();
     redraw = true;
   }
 

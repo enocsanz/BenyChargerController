@@ -31,6 +31,16 @@
 #define TERMO_DEFAULT_POWER 2000 // W, until the relay has measured it
 #define CONTRACTED_POWER 4600    // W, contracted power (overload protection)
 
+// Pool pump + chlorinator: Tongou relay over Tuya local (protocol 3.4).
+// Runs on solar surplus; hours per month (Jan..Dec), adjustable by Telegram.
+// Below the minimum, the shortfall is topped up the next night (00-08h) in
+// the cheapest hours.
+#define PISCINA_IP "192.168.1.51"
+#define PISCINA_LOCAL_KEY "YOUR_LOCAL_KEY16"
+#define PISCINA_POWER 400 // W, fixed: variable-speed motor, draw changes (150-460 W)
+#define PISCINA_MAX_HOURS {2, 2, 3, 4, 5, 6, 8, 8, 6, 4, 2, 2}
+#define PISCINA_MIN_HOURS {1, 1, 1, 2, 2, 3, 4, 4, 3, 2, 1, 1}
+
 // Debug
 #define PacketDebug false
 

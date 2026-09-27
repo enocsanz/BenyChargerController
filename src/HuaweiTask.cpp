@@ -11,6 +11,7 @@ ModbusIP mb;
 int32_t current_grid_power = 0;
 int32_t current_pv_power = 0;
 uint32_t grid_sample_count = 0;
+uint32_t pv_sample_count = 0;
 uint16_t gridPowerBuf[2]; // Buffer for Grid Power registers
 uint16_t pvPowerBuf[2];   // Buffer for PV Power registers
 
@@ -74,6 +75,7 @@ bool cbReadPVPower(Modbus::ResultCode event, uint16_t transactionId, void *data)
   if (event == Modbus::EX_SUCCESS) {
     int32_t raw = (int32_t)((pvPowerBuf[0] << 16) | pvPowerBuf[1]);
     current_pv_power = raw;
+    pv_sample_count++;
 #ifdef DEBUG_HUAWEI
     Serial.printf("Huawei: PV %d W\n", current_pv_power);
 #endif

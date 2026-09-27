@@ -17,8 +17,22 @@ void setupEsios() {
 }
 
 void loopEsios() {
-  if (millis() - esios_prices.lastUpdate > priceUpdateInterval ||
-      esios_prices.lastUpdate == 0) {
+  // Also refetch as soon as the day changes: the table holds a single day, and
+  // right after midnight it would otherwise serve yesterday's prices.
+  struct tm now;
+  bool newDay = getLocalTime(&now, 0) && now.tm_yday != esios_prices.yday;
+  bool due = millis() - esios_prices.lastUpdate > priceUpdateInterval ||
+             esios_prices.lastUpdate == 0 || newDay;
+
+  // A failed fetch is retried once a minute, not on every loop: each attempt
+  // is a TLS handshake that can stall the loop for seconds.
+  static unsigned long lastAttempt = 0;
+  static bool attempted = false;
+  if (due && attempted && millis() - lastAttempt < 60000) due = false;
+
+  if (due) {
+    attempted = true;
+    lastAttempt = millis();
     if (WiFi.status() == WL_CONNECTED) {
       WiFiClientSecure client;
       client.setInsecure();
@@ -36,7 +50,7 @@ void loopEsios() {
 
       // To do it right, we need time.
       struct tm timeinfo;
-      if (!getLocalTime(&timeinfo)) {
+      if (!getLocalTime(&timeinfo, 0)) {
         Serial.println("Failed to obtain time");
         return;
       }
@@ -62,6 +76,7 @@ void loopEsios() {
           DeserializationError error = deserializeJson(doc, http.getStream());
 
           if (!error) {
+            for (int i = 0; i < 24; i++) esios_prices.valid[i] = false;
             JsonArray values = doc["indicator"]["values"];
             for (JsonObject v : values) {
               // "datetime":"2023-10-27T00:00:00.000+02:00"
@@ -75,6 +90,7 @@ void loopEsios() {
               }
             }
             esios_prices.lastUpdate = millis();
+            esios_prices.yday = timeinfo.tm_yday;
             Serial.println("ESIOS prices updated");
           } else {
             Serial.print("ESIOS JSON parse failed: ");
@@ -89,13 +105,19 @@ void loopEsios() {
   }
 }
 
-float getCurrentPrice() {
+// Timeout 0: without NTP, getLocalTime() would otherwise wait 5s on every
+// call, and this runs on every screen refresh.
+float getPriceAt(int hour) {
   struct tm timeinfo;
-  if (getLocalTime(&timeinfo)) {
-    int h = timeinfo.tm_hour;
-    if (h >= 0 && h < 24 && esios_prices.valid[h]) {
-      return esios_prices.prices[h];
-    }
+  if (getLocalTime(&timeinfo, 0) && timeinfo.tm_yday == esios_prices.yday && hour >= 0 &&
+      hour < 24 && esios_prices.valid[hour]) {
+    return esios_prices.prices[hour];
   }
   return -1.0;
+}
+
+float getCurrentPrice() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo, 0)) return -1.0;
+  return getPriceAt(timeinfo.tm_hour);
 }

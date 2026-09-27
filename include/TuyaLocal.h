@@ -4,13 +4,16 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
-// Minimal local client for Tuya protocol 3.5 (0x6699 frames, AES-128-GCM with
-// a per-connection session key). Only what a metering relay needs: read its
+// Minimal local client for Tuya protocols 3.4 and 3.5, with the session key
+// negotiated on every connection. Only what a metering relay needs: read its
 // DPs and set the switch. No cloud involved; the local key is obtained once
 // with `python -m tinytuya wizard`.
+//   3.4: 0x55AA frames, AES-128-ECB + HMAC-SHA256
+//   3.5: 0x6699 frames, AES-128-GCM
 class TuyaLocal {
 public:
-  void begin(const char *ip, const char *localKey);
+  // version: 34 or 35. name: only for the log.
+  void begin(const char *name, const char *ip, const char *localKey, int version);
   void loop();             // Call often. Only (re)connecting blocks, <~7s.
   bool setSwitch(bool on); // false if there is no session
   bool connected() const { return _ready; }
@@ -23,7 +26,9 @@ public:
   unsigned long lastUpdate = 0; // millis() of the last DP report, 0 = never
 
 private:
+  const char *_name = "Tuya";
   IPAddress _ip;
+  int _version = 35;
   uint8_t _localKey[16];
   uint8_t _sessionKey[16];
   const uint8_t *_key = _localKey; // key for the frames in flight
@@ -44,8 +49,12 @@ private:
   bool connect();
   void close(const char *why);
   bool send(uint32_t cmd, const uint8_t *payload, size_t len);
+  bool send34(uint32_t cmd, const uint8_t *payload, size_t len);
+  bool send35(uint32_t cmd, const uint8_t *payload, size_t len);
   void pump();
   bool readFrame(uint32_t &cmd, size_t &ptLen);
+  int readFrame34(uint32_t &cmd, size_t &ptLen);
+  int readFrame35(uint32_t &cmd, size_t &ptLen);
   void handlePayload(const uint8_t *pt, size_t len);
 };
 

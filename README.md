@@ -1,6 +1,6 @@
 # CargadorBenyV2 — Control Inteligente de Carga EV
 
-Sistema de control de carga para vehículos eléctricos basado en **M5Stack Dial V1.1 (ESP32-S3)**, diseñado para gestionar un cargador **Beny** en combinación con un inversor solar **Huawei** y datos de precios eléctricos del mercado español (PVPC/ESIOS). También gestiona el **termo eléctrico (ACS)** mediante un relé Tuya controlado en local.
+Sistema de control de carga para vehículos eléctricos basado en **M5Stack Dial V1.1 (ESP32-S3)**, diseñado para gestionar un cargador **Beny** en combinación con un inversor solar **Huawei** y datos de precios eléctricos del mercado español (PVPC/ESIOS). También gestiona el **termo eléctrico (ACS)** y la **depuradora de la piscina** mediante relés Tuya controlados en local.
 
 El objetivo principal es maximizar el autoconsumo solar, proteger la instalación eléctrica y permitir el control remoto total vía **Telegram**.
 
@@ -31,11 +31,15 @@ El objetivo principal es maximizar el autoconsumo solar, proteger la instalació
                                    │  - Google Sheets │
 ┌─────────────┐     HTTPS          │  - ESIOS/PVPC   │
 │  Telegram   │◄──────────────────►│  - Termo (ACS)   │
-│  Bot API    │  (Comandos/Notif)  │                  │
+│  Bot API    │  (Comandos/Notif)  │  - Depuradora    │
 └─────────────┘                    │                  │
                                    │                  │
 ┌─────────────┐   Tuya local 3.5   │                  │
 │  Relé termo │◄──────────────────►│                  │
+│  (Tongou)   │  (TCP 6668, AES)   │                  │
+└─────────────┘                    │                  │
+┌─────────────┐   Tuya local 3.4   │                  │
+│ Relé piscina│◄──────────────────►│                  │
 │  (Tongou)   │  (TCP 6668, AES)   └──────────────────┘
 └─────────────┘
 ```
@@ -111,21 +115,64 @@ En `AUTO` el M5Dial manda sobre el relé: si se enciende o apaga desde la app Sm
 
 Fila superior: `ACS 2.0kW` en cian cuando calienta, `ACS OK` en verde cuando está habilitado en reposo, `ACS CARO` en naranja (cortado por precio), `ACS CORTE` en rojo (cortado por sobrecarga), `ACS OFF` en blanco (manual) y `ACS ?` en gris (sin conexión con el relé).
 
-### Control local (Tuya 3.5)
+### Control local (Tuya 3.4 / 3.5)
 
-El relé se controla **en local**, sin la nube de Tuya (`src/TuyaLocal.cpp`): protocolo 3.5 por TCP 6668, tramas `0x6699` cifradas con AES-128-GCM y una clave de sesión negociada en cada conexión (mbedtls del ESP32). Se consulta el estado cada 10 s, y el relé además avisa de cada cambio. Si la conexión cae, se reintenta cada 30 s.
+Los relés se controlan **en local**, sin la nube de Tuya (`src/TuyaLocal.cpp`), por TCP 6668 y con una clave de sesión negociada en cada conexión (mbedtls del ESP32):
+
+| Versión | Tramas | Cifrado | Relé |
+|---------|--------|---------|------|
+| 3.5 | `0x6699` | AES-128-GCM | Termo |
+| 3.4 | `0x55AA` | AES-128-ECB + HMAC-SHA256 | Depuradora |
+
+Se consulta el estado cada 10 s, y el relé además avisa de cada cambio. Si la conexión cae, se reintenta cada 30 s. Tras reiniciar el M5Dial, es normal que el relé cierre la primera sesión (aún tiene abierta la anterior) y que entre al segundo intento.
 
 La **clave local** solo se obtiene una vez desde la nube:
 
 1. Proyecto *Smart Home* en [iot.tuya.com](https://iot.tuya.com) (centro de datos *Central Europe*) y vincular la app en *Devices → Link App Account*. Si aparece `IoT Core service subscription has expired`, hay que pedir *Extend Trial Period* en *Cloud Services → IoT Core*.
 2. `python -m tinytuya wizard` en la carpeta del proyecto. Genera `devices.json` (con las claves) y `tinytuya.json` (con el API Secret), que están en `.gitignore`.
-3. Copiar la clave del termo a `TERMO_LOCAL_KEY` en `config.h`.
+3. Copiar la clave de cada relé a `TERMO_LOCAL_KEY` / `PISCINA_LOCAL_KEY` en `config.h`. La versión de protocolo de cada relé la da `python -m tinytuya scan`.
 
 Después la suscripción a la nube puede caducar, porque el M5Dial no la usa. La clave cambia si el relé se vuelve a emparejar en la app.
 
-> ⚠️ Dale al relé una **IP fija por DHCP** en el router. El M5Dial se conecta a `TERMO_IP`: si el router le cambia la IP, deja de encontrarlo (`ACS ?`).
+> ⚠️ Dale a cada relé una **IP fija por DHCP** en el router. El M5Dial se conecta a `TERMO_IP` / `PISCINA_IP`: si el router le cambia la IP, deja de encontrarlo.
 
 > Si el M5Dial o la WiFi fallan, el relé se queda en su último estado. El relé está configurado para recordar su estado tras un corte de luz (`relay_status = memory`) y no tiene temporizadores propios que se peleen con el M5Dial.
+
+## Depuradora de la Piscina
+
+La depuradora (motor de velocidad variable + clorador salino) va detrás de otro relé **Tongou TO-Q-SY1-JWT**. Funciona **con el sol sobrante**, pocas horas al día, sin encenderse y apagarse continuamente.
+
+### Sol sobrante
+
+`sobrante = producción solar − consumo de la casa sin el coche ni la depuradora` (= coche + depuradora − red, limitado a la producción solar). Como no descuenta el coche, **la depuradora tiene prioridad sobre el coche** en cualquier modo de carga; el DLB le da al coche lo que queda.
+
+El sobrante se promedia (media móvil exponencial de **5 min**) para que una nube no la pare. Durante el primer minuto tras arrancar el M5Dial se usa una media simple y no se toca el relé.
+
+### Reglas
+
+| Regla | Condición |
+|-------|-----------|
+| **Arranque** | Sobrante medio ≥ `PISCINA_POWER` + 100 W (500 W), parada desde hace ≥ 15 min y por debajo del máximo de hoy. |
+| **Parada** | Sobrante medio < 50 % de `PISCINA_POWER` (200 W) tras ≥ 30 min encendida, o máximo de hoy cumplido. |
+| **Mínimo** | Si un día no llega al mínimo, lo que falte se completa **esa madrugada (00-08 h) en las horas más baratas** (PVPC). Sin precios, se completa en cuanto empieza la madrugada. Lo no completado a las 08 h se descarta. |
+| **Arranque del M5Dial** | Si el relé está encendido, cuenta como recién encendido (se le respetan los 30 min); si está apagado, puede arrancar sin esperar. |
+
+`PISCINA_POWER` es **fijo (400 W)**: el motor es de velocidad variable y cambia de consumo cada cierto tiempo (se han medido 150-460 W), así que aprender la potencia movería los umbrales.
+
+### Horas por mes
+
+| | Ene | Feb | Mar | Abr | May | Jun | Jul | Ago | Sep | Oct | Nov | Dic |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Máximo (h) | 2 | 2 | 3 | 4 | 5 | 6 | 8 | 8 | 6 | 4 | 2 | 2 |
+| Mínimo (h) | 1 | 1 | 1 | 2 | 2 | 3 | 4 | 4 | 3 | 2 | 1 | 1 |
+
+Valores por defecto en `PISCINA_MAX_HOURS` / `PISCINA_MIN_HOURS`. `/set_piscina_horas MAX MIN` cambia los del mes en curso y se guardan. El tiempo de hoy se guarda cada 5 min, así que sobrevive a un reinicio.
+
+### Pantalla
+
+A la izquierda del número grande, las horas de hoy (`2.1h`): azul cielo funcionando con sol, violeta completando el mínimo, verde con el máximo cumplido, gris esperando sol, blanco en manual. No aparece sin conexión con el relé.
+
+> Quita cualquier **programación horaria** del relé en la app Smart Life: en `AUTO` el M5Dial manda sobre él y la devolvería a su estado.
 
 ## Reconexión WiFi
 
@@ -152,6 +199,7 @@ La pantalla es redonda (GC9A01, 240×240). Todo se dibuja en un *canvas* fuera d
 | Fila | Contenido | Color |
 |------|-----------|-------|
 | 0 | Termo (ACS) | Ver [Termo Eléctrico](#termo-eléctrico-acs) |
+| 4 (izquierda) | Horas de depuradora hoy | Ver [Depuradora](#depuradora-de-la-piscina) |
 | 1 | Precio PVPC (€/kWh) | Verde < umbral, naranja < umbral + 0,02, rojo por encima |
 | 2 | Red: potencia actual / límite (kW) | Verde exportando, naranja < 5 kW, rojo ≥ 5 kW |
 | 3 | Producción solar (kW) | Verde > 50 W, naranja en otro caso |
@@ -204,7 +252,16 @@ La pantalla es redonda (GC9A01, 240×240). Todo se dibuja en un *canvas* fuera d
 | `/termo_off` | Relé abierto hasta volver a `/termo_auto` o `/termo_on`. |
 | `/set_termo_precio <valor>` | Precio (€/kWh) a partir del cual se corta en AUTO. Entre 0 y 1. Defecto 0.20. |
 
-`/status` incluye también el estado del termo.
+### Depuradora (piscina)
+| Comando | Descripción |
+|---------|-------------|
+| `/piscina` | Estado, horas de hoy (máximo y mínimo del mes), pendiente de completar y sobrante medio. |
+| `/piscina_auto` | Modo AUTO: con sol, con máximo y mínimo diarios. |
+| `/piscina_on` | Encendida hasta volver a `/piscina_auto`. |
+| `/piscina_off` | Apagada hasta volver a `/piscina_auto`. |
+| `/set_piscina_horas <max> <min>` | Horas máximas y mínimas al día del mes en curso (`min ≤ max ≤ 24`). |
+
+`/status` incluye también el estado del termo y de la depuradora.
 
 ### Comandos retirados
 `/set_pausa`, `/set_reinicio`, `/set_margen` (pausa automática eliminada), `/off`, `/stop` y `/turbo`. Siguen reconociéndose para responder con una explicación en vez de fallar en silencio.
@@ -226,9 +283,10 @@ CargadorBenyV2/
 │   ├── EsiosTask.h         # Interfaz de precios PVPC (struct PriceState)
 │   ├── GoogleSheetsTask.h  # Interfaz del datalogger
 │   ├── HuaweiTask.h        # Interfaz del inversor Huawei (grid + PV power)
+│   ├── PiscinaTask.h       # Interfaz de la depuradora (modos, estado)
 │   ├── TelegramTask.h      # Interfaz del bot de Telegram
 │   ├── TermoTask.h         # Interfaz del termo (modos, estado)
-│   └── TuyaLocal.h         # Cliente Tuya local 3.5
+│   └── TuyaLocal.h         # Cliente Tuya local 3.4 / 3.5
 ├── src/
 │   ├── main.cpp            # Setup, loop, DLB logic, UI, dial/táctil, salvapantallas
 │   ├── BenyTask.cpp        # Comunicación UDP con el cargador Beny
@@ -237,7 +295,8 @@ CargadorBenyV2/
 │   ├── EsiosTask.cpp       # Consulta de precios PVPC vía API ESIOS
 │   ├── GoogleSheetsTask.cpp# Envío horario de datos a Google Sheets
 │   ├── TermoTask.cpp       # Reglas del termo: precio y sobrecarga
-│   ├── TuyaLocal.cpp       # Protocolo Tuya 3.5 (AES-GCM, sesión) para el relé
+│   ├── PiscinaTask.cpp     # Reglas de la depuradora: sol, horas, mínimo nocturno
+│   ├── TuyaLocal.cpp       # Protocolo Tuya 3.4 / 3.5 (sesión, AES) para los relés
 │   ├── config.h.example    # Plantilla de config.h (credenciales y constantes)
 └── platformio.ini          # Configuración de PlatformIO
 ```
@@ -252,8 +311,8 @@ CargadorBenyV2/
 | Telegram | 2s | Polling de mensajes entrantes. |
 | Pantalla | 500ms | Refresco de la interfaz visual. |
 | Google Sheets | 10s (check) / 1h (envío) | Envío de datos cada hora en punto. |
-| Precios ESIOS | Variable | Consulta diaria de precios PVPC. |
-| Termo (Tuya local) | 10s + avisos del relé | Estado y potencia del relé. Reglas cada 1s. |
+| Precios ESIOS | 1h, y al cambiar de día | Precios PVPC del día. Tras un fallo, reintento cada minuto. |
+| Termo y depuradora (Tuya local) | 10s + avisos del relé | Estado y potencia de los relés. Reglas cada 1s. |
 
 ## Google Sheets — Parámetros Enviados
 
@@ -278,6 +337,7 @@ Cada hora en punto, el sistema envía un `GET` al Google Apps Script con los sig
 - **Cargador Beny** con interfaz de red UDP (puerto 3333)
 - **Inversor Solar Huawei** con Smart Meter Modbus TCP (puerto 502)
 - **Relé Tongou TO-Q-SY1-JWT** (Tuya WiFi, carril DIN, con medición) delante del termo eléctrico
+- Otro **Tongou TO-Q-SY1-JWT** delante de la depuradora y el clorador de la piscina
 
 > ⚠️ **El inversor Huawei solo admite un cliente Modbus TCP a la vez.** Si hay otro equipo conectado (por ejemplo el M5StickC antiguo, Home Assistant…), el M5Dial conecta y el inversor corta la conexión al instante: en el log aparece `Connected successfully!` → `Lost Connection` y errores `0xE4`, y red y solar se quedan a 0.
 - **Red WiFi** con acceso a Internet (para Telegram, ESIOS, Google Sheets)
@@ -293,6 +353,7 @@ Cada hora en punto, el sistema envía un `GET` al Google Apps Script con los sig
    - `GOOGLE_SCRIPT_URL` — URL del Google Apps Script desplegado.
    - `TERMO_IP` / `TERMO_LOCAL_KEY` — Relé del termo (ver [Control local](#control-local-tuya-35)).
    - `TERMO_MAX_PRICE`, `TERMO_DEFAULT_POWER`, `CONTRACTED_POWER` — Umbral de precio, potencia del termo hasta medirla y potencia contratada.
+   - `PISCINA_IP` / `PISCINA_LOCAL_KEY` / `PISCINA_POWER` / `PISCINA_MAX_HOURS` / `PISCINA_MIN_HOURS` — Relé de la depuradora, su potencia y las horas por mes.
 
 2. **Compilar y cargar** con PlatformIO (por USB — no hay actualización OTA):
    ```bash
@@ -315,6 +376,9 @@ Los siguientes valores se guardan en la memoria flash (NVS) del ESP32 y sobreviv
 | `limit` | int | Objetivo de potencia de red del modo Balanceo (W). |
 | `t_mode` | int | Modo del termo (0=AUTO, 1=ON, 2=OFF). |
 | `t_price` | float | Umbral de precio del termo (€/kWh). |
+| `p_mode` | int | Modo de la depuradora (0=AUTO, 1=ON, 2=OFF). |
+| `p_day`, `p_mon`, `p_run`, `p_def` | int | Día en curso, su mes, segundos de depuradora hoy y segundos pendientes de completar. |
+| `p_max0`…`p_max11`, `p_min0`…`p_min11` | float | Horas máximas y mínimas por mes, si se cambiaron por Telegram. |
 
 En un equipo recién programado la NVS está vacía y el arranque muestra `nvs_open failed: NOT_FOUND`: es normal, se usan los valores por defecto hasta el primer guardado.
 

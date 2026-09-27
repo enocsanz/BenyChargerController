@@ -23,7 +23,7 @@ void loopGoogleSheets() {
     lastSheetsCheck = millis();
 
     struct tm timeinfo;
-    if (!getLocalTime(&timeinfo))
+    if (!getLocalTime(&timeinfo, 0))
       return;
 
     // Condition: Hourly logging (Minute == 0)

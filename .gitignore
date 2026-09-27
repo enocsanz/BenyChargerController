@@ -11,3 +11,8 @@ src/config.h
 include/config.h
 *.txt
 lib/
+
+# tinytuya wizard output (contains Tuya local keys and API secret)
+devices.json
+tinytuya.json
+tuya-raw.json

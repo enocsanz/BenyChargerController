@@ -22,6 +22,15 @@
 #define SOLAR_GRID_TARGET 0
 #define PRICE_THRESHOLD 0.05
 
+// Electric water heater (ACS): Tongou relay over Tuya local (protocol 3.5).
+// Local key from `python -m tinytuya wizard` (devices.json). It changes if the
+// relay is paired again in the app. Give the relay a fixed IP in the router.
+#define TERMO_IP "192.168.1.50"
+#define TERMO_LOCAL_KEY "YOUR_LOCAL_KEY16"
+#define TERMO_MAX_PRICE 0.20     // E/kWh: above this the heater is cut (AUTO)
+#define TERMO_DEFAULT_POWER 2000 // W, until the relay has measured it
+#define CONTRACTED_POWER 4600    // W, contracted power (overload protection)
+
 // Debug
 #define PacketDebug false
 

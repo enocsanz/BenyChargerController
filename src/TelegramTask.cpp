@@ -1,5 +1,6 @@
 #include "TelegramTask.h"
 #include "BenyTask.h"
+#include "TermoTask.h"
 
 // #include "WeatherTask.h" REMOVED
 
@@ -63,7 +64,13 @@ void handleNewMessages(int numNewMessages) {
              "A es el suelo del cargador: si no hay sol, ese consumo se toma de la red.\n\n";
       msg += "AJUSTES: \n";
       msg += "Limite Red: /set_limit W (Objetivo del modo Balanceo)\n";
-      msg += "Precio: /set_price E/kWh (Solo informativo, colorea la pantalla)\n";
+      msg += "Precio: /set_price E/kWh (Solo informativo, colorea la pantalla)\n\n";
+      msg += "TERMO (ACS):\n";
+      msg += "/termo - Estado del termo\n";
+      msg += "/termo_auto - Corta por precio y por sobrecarga\n";
+      msg += "/termo_on - Ignora el precio (sigue cortando por sobrecarga)\n";
+      msg += "/termo_off - Apagado\n";
+      msg += "/set_termo_precio E/kWh - Precio a partir del cual se corta\n";
       bot.sendMessage(chat_id, msg, "");
     } else if (textLower == "/status") {
       String msg = "📊 ESTADO DEL SISTEMA \n\n";
@@ -95,6 +102,7 @@ void handleNewMessages(int numNewMessages) {
         msg += "⚠️ Cargando al minimo (" + String(BENY_MIN_AMPS) +
                "A): el DLB no puede bajar mas.\n";
       }
+      msg += "\n" + termoStatusText() + "\n";
 
       bot.sendMessage(chat_id, msg, "");
 
@@ -148,6 +156,31 @@ void handleNewMessages(int numNewMessages) {
       manual_logic_trigger = true;
       bot.sendMessage(
           chat_id, "Modo: BALANCEO (Lim Red " + String(max_grid_power) + "W).", "");
+    } else if (textLower == "/termo") {
+      bot.sendMessage(chat_id, termoStatusText(), "");
+    } else if (textLower == "/termo_auto" || textLower == "/termo auto") {
+      setTermoMode(TERMO_AUTO);
+      manual_logic_trigger = true;
+      bot.sendMessage(chat_id, "Termo: AUTO (se corta con precio > " +
+                                   String(termo_max_price, 3) + " E/kWh o sobrecarga).", "");
+    } else if (textLower == "/termo_on" || textLower == "/termo on") {
+      setTermoMode(TERMO_ON);
+      manual_logic_trigger = true;
+      bot.sendMessage(chat_id, "Termo: ON (ignora el precio; se sigue cortando por sobrecarga). "
+                               "Vuelve con /termo_auto.", "");
+    } else if (textLower == "/termo_off" || textLower == "/termo off") {
+      setTermoMode(TERMO_OFF);
+      manual_logic_trigger = true;
+      bot.sendMessage(chat_id, "Termo: OFF. Vuelve con /termo_auto.", "");
+    } else if (textLower.startsWith("/set_termo_precio ")) {
+      float val = text.substring(18).toFloat(); // Length of "/set_termo_precio "
+      if (val > 0 && val < 1) {
+        setTermoMaxPrice(val);
+        manual_logic_trigger = true;
+        bot.sendMessage(chat_id, "Termo: se corta con precio > " + String(val, 3) + " E/kWh.", "");
+      } else {
+        bot.sendMessage(chat_id, "Valor invalido (E/kWh, entre 0 y 1, usa . para decimales)", "");
+      }
     } else if (textLower == "/off" || textLower == "/stop") {
       bot.sendMessage(chat_id, "❌ Comando /off desactivado (Modo 'Plug and Charge' activo en el cargador).", "");
     }

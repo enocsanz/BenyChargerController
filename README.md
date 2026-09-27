@@ -1,6 +1,6 @@
 # CargadorBenyV2 — Control Inteligente de Carga EV
 
-Sistema de control de carga para vehículos eléctricos basado en **M5Stack Dial V1.1 (ESP32-S3)**, diseñado para gestionar un cargador **Beny** en combinación con un inversor solar **Huawei** y datos de precios eléctricos del mercado español (PVPC/ESIOS).
+Sistema de control de carga para vehículos eléctricos basado en **M5Stack Dial V1.1 (ESP32-S3)**, diseñado para gestionar un cargador **Beny** en combinación con un inversor solar **Huawei** y datos de precios eléctricos del mercado español (PVPC/ESIOS). También gestiona el **termo eléctrico (ACS)** mediante un relé Tuya controlado en local.
 
 El objetivo principal es maximizar el autoconsumo solar, proteger la instalación eléctrica y permitir el control remoto total vía **Telegram**.
 
@@ -30,8 +30,13 @@ El objetivo principal es maximizar el autoconsumo solar, proteger la instalació
 └─────────────┘                    │  - Telegram Bot  │
                                    │  - Google Sheets │
 ┌─────────────┐     HTTPS          │  - ESIOS/PVPC   │
-│  Telegram   │◄──────────────────►│                  │
-│  Bot API    │  (Comandos/Notif)  └──────────────────┘
+│  Telegram   │◄──────────────────►│  - Termo (ACS)   │
+│  Bot API    │  (Comandos/Notif)  │                  │
+└─────────────┘                    │                  │
+                                   │                  │
+┌─────────────┐   Tuya local 3.5   │                  │
+│  Relé termo │◄──────────────────►│                  │
+│  (Tongou)   │  (TCP 6668, AES)   └──────────────────┘
 └─────────────┘
 ```
 
@@ -74,6 +79,54 @@ La versión anterior ajustaba ±1A cada segundo aunque la lectura fuese la misma
 
 Medido con el coche cargando y límite de 4,6 kW: el tiempo por encima de 5,2 kW bajó del 16 % al 1 % y la potencia media de carga subió de ~3,1 a ~3,6 kW. La variación que queda se debe sobre todo a los consumos de la casa, que por sí solos oscilan ±1 kW.
 
+## Termo Eléctrico (ACS)
+
+El termo tiene su propio termostato mecánico. Delante lleva un relé de carril **Tongou TO-Q-SY1-JWT** con medición de potencia. El M5Dial no hace calentar al termo: solo **habilita o corta** el relé, y con el relé cerrado sigue mandando el termostato.
+
+### Reglas
+
+| Regla | Condición | Acción |
+|-------|-----------|--------|
+| **Precio** | PVPC de la hora > umbral (`/set_termo_precio`, 0,20 €/kWh por defecto) | Relé abierto hasta que el precio baje. |
+| **Sobrecarga** | Red > `CONTRACTED_POWER` + 200 W durante **30 s**, **con el coche ya al mínimo** (6A) o sin cargar | Relé abierto. Aviso por Telegram. |
+| **Vuelta tras sobrecarga** | Al menos **5 min** cortado y **2 min seguidos** con sitio para el termo | Relé cerrado. Aviso por Telegram. |
+| **Encendido con sitio** | Al volver a estar permitido (baja el precio, `/termo_auto`, arranque) | Solo se cierra si el termo cabe; si no, espera a que haya sitio. |
+| **Sin precio** | ESIOS no responde o no hay hora | El precio **no bloquea**: mejor una hora cara que quedarse sin agua caliente. |
+
+**El coche cede primero.** Si no cabe todo, el DLB baja el coche hasta 6A. El termo solo se corta si con el coche al mínimo sigue habiendo sobrecarga (el horno, la vitro, el secador…). Los picos cortos no cuentan, porque la distribuidora los tolera.
+
+Para saber si el termo cabe se usa su **potencia real**, que el relé mide cada vez que calienta (hasta la primera medida se toman `TERMO_DEFAULT_POWER` = 2000 W). La cuenta es: red actual − lo que el coche aún podría ceder hasta 6A − lo que consume ahora el termo + potencia del termo ≤ contratada − 200 W. No se actúa sobre una lectura de red de más de 30 s.
+
+### Modos
+
+| Modo | Precio | Sobrecarga |
+|------|--------|------------|
+| `AUTO` (por defecto) | Corta | Corta |
+| `ON` | Se ignora | Corta |
+| `OFF` | Relé siempre abierto | — |
+
+En `AUTO` el M5Dial manda sobre el relé: si se enciende o apaga desde la app Smart Life, lo devuelve a su estado en unos segundos. Para mandar a mano, usa `/termo_on` o `/termo_off`.
+
+### Pantalla
+
+Fila superior: `ACS 2.0kW` en cian cuando calienta, `ACS OK` en verde cuando está habilitado en reposo, `ACS CARO` en naranja (cortado por precio), `ACS CORTE` en rojo (cortado por sobrecarga), `ACS OFF` en blanco (manual) y `ACS ?` en gris (sin conexión con el relé).
+
+### Control local (Tuya 3.5)
+
+El relé se controla **en local**, sin la nube de Tuya (`src/TuyaLocal.cpp`): protocolo 3.5 por TCP 6668, tramas `0x6699` cifradas con AES-128-GCM y una clave de sesión negociada en cada conexión (mbedtls del ESP32). Se consulta el estado cada 10 s, y el relé además avisa de cada cambio. Si la conexión cae, se reintenta cada 30 s.
+
+La **clave local** solo se obtiene una vez desde la nube:
+
+1. Proyecto *Smart Home* en [iot.tuya.com](https://iot.tuya.com) (centro de datos *Central Europe*) y vincular la app en *Devices → Link App Account*. Si aparece `IoT Core service subscription has expired`, hay que pedir *Extend Trial Period* en *Cloud Services → IoT Core*.
+2. `python -m tinytuya wizard` en la carpeta del proyecto. Genera `devices.json` (con las claves) y `tinytuya.json` (con el API Secret), que están en `.gitignore`.
+3. Copiar la clave del termo a `TERMO_LOCAL_KEY` en `config.h`.
+
+Después la suscripción a la nube puede caducar, porque el M5Dial no la usa. La clave cambia si el relé se vuelve a emparejar en la app.
+
+> ⚠️ Dale al relé una **IP fija por DHCP** en el router. El M5Dial se conecta a `TERMO_IP`: si el router le cambia la IP, deja de encontrarlo (`ACS ?`).
+
+> Si el M5Dial o la WiFi fallan, el relé se queda en su último estado. El relé está configurado para recordar su estado tras un corte de luz (`relay_status = memory`) y no tiene temporizadores propios que se peleen con el M5Dial.
+
 ## Reconexión WiFi
 
 `WiFi.setAutoReconnect(true)` por sí solo no siempre recupera al ESP32 cuando el punto de acceso desaparece un rato, así que la reconexión es **escalonada y no bloqueante**:
@@ -98,6 +151,7 @@ La pantalla es redonda (GC9A01, 240×240). Todo se dibuja en un *canvas* fuera d
 
 | Fila | Contenido | Color |
 |------|-----------|-------|
+| 0 | Termo (ACS) | Ver [Termo Eléctrico](#termo-eléctrico-acs) |
 | 1 | Precio PVPC (€/kWh) | Verde < umbral, naranja < umbral + 0,02, rojo por encima |
 | 2 | Red: potencia actual / límite (kW) | Verde exportando, naranja < 5 kW, rojo ≥ 5 kW |
 | 3 | Producción solar (kW) | Verde > 50 W, naranja en otro caso |
@@ -141,6 +195,17 @@ La pantalla es redonda (GC9A01, 240×240). Todo se dibuja en un *canvas* fuera d
 | `/set_limit <watts>` | Objetivo de red del modo Balanceo (W). | 1000 – 10000 | 4600 |
 | `/set_price <valor>` | Umbral de precio eléctrico (solo informativo). | > 0 | 0.05 |
 
+### Termo (ACS)
+| Comando | Descripción |
+|---------|-------------|
+| `/termo` | Estado del termo: calentando / en reposo / cortado (y por qué), modo y umbral. |
+| `/termo_auto` | Modo AUTO: se corta por precio y por sobrecarga. |
+| `/termo_on` | Ignora el precio; la protección por sobrecarga sigue activa. |
+| `/termo_off` | Relé abierto hasta volver a `/termo_auto` o `/termo_on`. |
+| `/set_termo_precio <valor>` | Precio (€/kWh) a partir del cual se corta en AUTO. Entre 0 y 1. Defecto 0.20. |
+
+`/status` incluye también el estado del termo.
+
 ### Comandos retirados
 `/set_pausa`, `/set_reinicio`, `/set_margen` (pausa automática eliminada), `/off`, `/stop` y `/turbo`. Siguen reconociéndose para responder con una explicación en vez de fallar en silencio.
 
@@ -148,6 +213,7 @@ La pantalla es redonda (GC9A01, 240×240). Todo se dibuja en un *canvas* fuera d
 El sistema envía mensajes proactivos a Telegram cuando:
 - Se inicia el sistema (indicando el modo activo).
 - Se cambia de modo pulsando el dial del M5Dial.
+- El termo se corta por sobrecarga, y cuando se reactiva.
 
 Las notificaciones **no se envían desde el punto donde se generan**: se encolan (hasta 4) y `loopTelegram()` entrega una por ciclo de polling. `bot.sendMessage()` es una petición HTTPS bloqueante de varios segundos, y llamarla desde `setup()` o desde la lógica de control podía agotar el watchdog de 30s y reiniciar el equipo.
 
@@ -160,7 +226,9 @@ CargadorBenyV2/
 │   ├── EsiosTask.h         # Interfaz de precios PVPC (struct PriceState)
 │   ├── GoogleSheetsTask.h  # Interfaz del datalogger
 │   ├── HuaweiTask.h        # Interfaz del inversor Huawei (grid + PV power)
-│   └── TelegramTask.h      # Interfaz del bot de Telegram
+│   ├── TelegramTask.h      # Interfaz del bot de Telegram
+│   ├── TermoTask.h         # Interfaz del termo (modos, estado)
+│   └── TuyaLocal.h         # Cliente Tuya local 3.5
 ├── src/
 │   ├── main.cpp            # Setup, loop, DLB logic, UI, dial/táctil, salvapantallas
 │   ├── BenyTask.cpp        # Comunicación UDP con el cargador Beny
@@ -168,7 +236,8 @@ CargadorBenyV2/
 │   ├── TelegramTask.cpp    # Bot de Telegram (comandos + notificaciones)
 │   ├── EsiosTask.cpp       # Consulta de precios PVPC vía API ESIOS
 │   ├── GoogleSheetsTask.cpp# Envío horario de datos a Google Sheets
-│   ├── TuyaLocal.h         # Borrador de interfaz Tuya (aún sin uso)
+│   ├── TermoTask.cpp       # Reglas del termo: precio y sobrecarga
+│   ├── TuyaLocal.cpp       # Protocolo Tuya 3.5 (AES-GCM, sesión) para el relé
 │   ├── config.h.example    # Plantilla de config.h (credenciales y constantes)
 └── platformio.ini          # Configuración de PlatformIO
 ```
@@ -184,6 +253,7 @@ CargadorBenyV2/
 | Pantalla | 500ms | Refresco de la interfaz visual. |
 | Google Sheets | 10s (check) / 1h (envío) | Envío de datos cada hora en punto. |
 | Precios ESIOS | Variable | Consulta diaria de precios PVPC. |
+| Termo (Tuya local) | 10s + avisos del relé | Estado y potencia del relé. Reglas cada 1s. |
 
 ## Google Sheets — Parámetros Enviados
 
@@ -207,6 +277,7 @@ Cada hora en punto, el sistema envía un `GET` al Google Apps Script con los sig
 - **M5Stack Dial V1.1** (StampS3A: ESP32-S3FN8, 8 MB de flash, sin PSRAM; pantalla redonda táctil 240×240, encoder rotativo con pulsador)
 - **Cargador Beny** con interfaz de red UDP (puerto 3333)
 - **Inversor Solar Huawei** con Smart Meter Modbus TCP (puerto 502)
+- **Relé Tongou TO-Q-SY1-JWT** (Tuya WiFi, carril DIN, con medición) delante del termo eléctrico
 
 > ⚠️ **El inversor Huawei solo admite un cliente Modbus TCP a la vez.** Si hay otro equipo conectado (por ejemplo el M5StickC antiguo, Home Assistant…), el M5Dial conecta y el inversor corta la conexión al instante: en el log aparece `Connected successfully!` → `Lost Connection` y errores `0xE4`, y red y solar se quedan a 0.
 - **Red WiFi** con acceso a Internet (para Telegram, ESIOS, Google Sheets)
@@ -220,6 +291,8 @@ Cada hora en punto, el sistema envía un `GET` al Google Apps Script con los sig
    - `INVERTER_IP` — IP del inversor Huawei.
    - `ESIOS_TOKEN` — Token de la API de ESIOS (REE).
    - `GOOGLE_SCRIPT_URL` — URL del Google Apps Script desplegado.
+   - `TERMO_IP` / `TERMO_LOCAL_KEY` — Relé del termo (ver [Control local](#control-local-tuya-35)).
+   - `TERMO_MAX_PRICE`, `TERMO_DEFAULT_POWER`, `CONTRACTED_POWER` — Umbral de precio, potencia del termo hasta medirla y potencia contratada.
 
 2. **Compilar y cargar** con PlatformIO (por USB — no hay actualización OTA):
    ```bash
@@ -240,6 +313,8 @@ Los siguientes valores se guardan en la memoria flash (NVS) del ESP32 y sobreviv
 |-------|------|-------------|
 | `mode` | int | Modo de carga activo (0, 1). |
 | `limit` | int | Objetivo de potencia de red del modo Balanceo (W). |
+| `t_mode` | int | Modo del termo (0=AUTO, 1=ON, 2=OFF). |
+| `t_price` | float | Umbral de precio del termo (€/kWh). |
 
 En un equipo recién programado la NVS está vacía y el arranque muestra `nvs_open failed: NOT_FOUND`: es normal, se usan los valores por defecto hasta el primer guardado.
 

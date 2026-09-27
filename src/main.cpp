@@ -3,6 +3,7 @@
 #include "GoogleSheetsTask.h"
 #include "HuaweiTask.h"
 #include "TelegramTask.h"
+#include "TermoTask.h"
 
 #include "config.h"
 #include <Arduino.h>
@@ -157,6 +158,8 @@ void setup() {
 
   setupEsios(); // Fetches price immediately
 
+  setupTermo();
+
   // Force Logic run immediately
   lastLogicRun = millis() - logicInterval;
 
@@ -263,17 +266,51 @@ void drawStatusScreen(bool fullClear) {
   canvas.fillSprite(TFT_BLACK);
   canvas.setTextDatum(middle_center);
   char buf[40];
+  uint16_t c;
+
+  // Water heater, top row (the narrowest: at most ~9 characters).
+  // Cyan heating, green enabled, orange cut by price, red cut by overload.
+  TermoStatus ts = getTermoStatus();
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  switch (ts.reason) {
+  case TR_ENABLED:
+    if (ts.power > 100) {
+      c = TFT_CYAN;
+      snprintf(buf, sizeof(buf), "ACS %.1fkW", ts.power / 1000.0);
+    } else {
+      c = TFT_GREEN;
+      snprintf(buf, sizeof(buf), "ACS OK");
+    }
+    break;
+  case TR_PRICE:
+    c = TFT_ORANGE;
+    snprintf(buf, sizeof(buf), "ACS CARO");
+    break;
+  case TR_OVERLOAD:
+    c = TFT_RED;
+    snprintf(buf, sizeof(buf), "ACS CORTE");
+    break;
+  case TR_MANUAL:
+    c = TFT_WHITE;
+    snprintf(buf, sizeof(buf), "ACS OFF");
+    break;
+  default:
+    c = TFT_DARKGREY;
+    snprintf(buf, sizeof(buf), "ACS ?");
+    break;
+  }
+  canvas.setTextColor(c);
+  canvas.drawString(buf, 120, 17);
 
   // Price (Green < th, Orange < th+0.02, else Red)
   float price = getCurrentPrice();
-  uint16_t c;
   if (price < max_price_threshold) c = TFT_GREEN;
   else if (price < (max_price_threshold + 0.02)) c = TFT_ORANGE;
   else c = TFT_RED;
   canvas.setFont(&fonts::FreeSansBold9pt7b);
   canvas.setTextColor(c);
   snprintf(buf, sizeof(buf), "%.3f EUR", price);
-  canvas.drawString(buf, 120, 34);
+  canvas.drawString(buf, 120, 38);
 
   // Grid: exporting green, <5kW orange, else red
   if (current_grid_power < 0) c = TFT_GREEN;
@@ -465,6 +502,7 @@ void loop() {
 
     loopBeny();
     loopEsios();
+    loopTermo();
   }
 
   // --- SCREEN DISPATCHER (0.5s) ---
@@ -481,6 +519,7 @@ void loop() {
     lastLogicRun = millis();
     manual_logic_trigger = false;
     runSmartChargingLogic();
+    runTermoLogic();
     redraw = true;
   }
 

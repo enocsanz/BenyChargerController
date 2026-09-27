@@ -1,4 +1,5 @@
 #include "TuyaLocal.h"
+#include "GoogleSheetsTask.h"
 #include <ArduinoJson.h>
 #include <esp_random.h>
 #include <mbedtls/aes.h>
@@ -227,6 +228,9 @@ bool TuyaLocal::connect() {
   Serial.printf("%s: Conectando a %s...\n", _name, _ip.toString().c_str());
   if (!_client.connect(_ip, TUYA_PORT, CONNECT_TIMEOUT)) {
     Serial.printf("%s: Sin respuesta del rele\n", _name);
+    // As an event only once per outage: it repeats every RETRY_INTERVAL
+    if (!_failLogged) logEventf("TUYA", "%s: sin respuesta del rele", _name);
+    _failLogged = true;
     return false;
   }
   _client.setNoDelay(true);
@@ -284,12 +288,13 @@ bool TuyaLocal::connect() {
   _ready = true;
   _lastRx = millis();
   _lastPoll = 0; // query right away
-  Serial.printf("%s: Sesion establecida\n", _name);
+  logEventf("TUYA", "%s: sesion establecida", _name);
+  _failLogged = false;
   return true;
 }
 
 void TuyaLocal::close(const char *why) {
-  Serial.printf("%s: Desconectado (%s)\n", _name, why);
+  logEventf("TUYA", "%s: desconectado (%s)", _name, why);
   _client.stop();
   _ready = false;
   _rxLen = 0;

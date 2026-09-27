@@ -94,7 +94,7 @@ El termo tiene su propio termostato mecánico. Delante lleva un relé de carril 
 | **Precio** | PVPC de la hora > umbral (`/set_termo_precio`, 0,20 €/kWh por defecto) | Relé abierto hasta que el precio baje. |
 | **Sobrecarga** | Red > `CONTRACTED_POWER` + 200 W durante **30 s**, **con el coche ya al mínimo** (6A) o sin cargar | Relé abierto. Aviso por Telegram. |
 | **Vuelta tras sobrecarga** | Al menos **5 min** cortado y **2 min seguidos** con sitio para el termo | Relé cerrado. Aviso por Telegram. |
-| **Encendido con sitio** | Al volver a estar permitido (baja el precio, `/termo_auto`, arranque) | Solo se cierra si el termo cabe; si no, espera a que haya sitio. |
+| **Encendido con sitio** | Al volver a estar permitido (baja el precio, `/termo_auto`, arranque) | Solo se cierra si el termo cabe; si no, espera a que haya sitio. Sin lectura de red todavía (arranque), espera hasta 5 min por ella y después se cierra igualmente. |
 | **Sin precio** | ESIOS no responde o no hay hora | El precio **no bloquea**: mejor una hora cara que quedarse sin agua caliente. |
 
 **El coche cede primero.** Si no cabe todo, el DLB baja el coche hasta 6A. El termo solo se corta si con el coche al mínimo sigue habiendo sobrecarga (el horno, la vitro, el secador…). Los picos cortos no cuentan, porque la distribuidora los tolera.
@@ -263,6 +263,12 @@ La pantalla es redonda (GC9A01, 240×240). Todo se dibuja en un *canvas* fuera d
 
 `/status` incluye también el estado del termo y de la depuradora.
 
+### Diagnóstico
+| Comando | Descripción |
+|---------|-------------|
+| `/diag` | Estado del registro en Google Sheets: pendiente de enviar y resultado del último envío. |
+| `/diag_on` / `/diag_off` | Activa o para el registro por minuto y de eventos. |
+
 ### Comandos retirados
 `/set_pausa`, `/set_reinicio`, `/set_margen` (pausa automática eliminada), `/off`, `/stop` y `/turbo`. Siguen reconociéndose para responder con una explicación en vez de fallar en silencio.
 
@@ -311,6 +317,7 @@ CargadorBenyV2/
 | Telegram | 2s | Polling de mensajes entrantes. |
 | Pantalla | 500ms | Refresco de la interfaz visual. |
 | Google Sheets | 10s (check) / 1h (envío) | Envío de datos cada hora en punto. |
+| Diagnóstico (Sheets) | 1 min (muestra) / 5 min (envío) | Muestras y eventos por lotes. |
 | Precios ESIOS | 1h, y al cambiar de día | Precios PVPC del día. Tras un fallo, reintento cada minuto. |
 | Termo y depuradora (Tuya local) | 10s + avisos del relé | Estado y potencia de los relés. Reglas cada 1s. |
 
@@ -330,6 +337,31 @@ Cada hora en punto, el sistema envía un `GET` al Google Apps Script con los sig
 | `amps` | int | Amperaje objetivo del DLB (A). |
 
 > El fichero `google_apps_script.js` de este repo ya está alineado con estos parámetros, pero **hay que volver a desplegarlo** en Google Apps Script para que los cambios surtan efecto.
+
+## Diagnóstico en Google Sheets
+
+Registro detallado para analizar durante unos días el funcionamiento de todo el sistema. Va aparte del registro horario, que sigue igual en la primera pestaña.
+
+| Pestaña | Contenido |
+|---------|-----------|
+| **Muestras** | Una fila por minuto: red (actual, mínimo y máximo del minuto, para ver los picos), solar, precio, modo, Beny (W, estado, amperios objetivo y reales), termo (estado, W, relé), depuradora (estado, W, relé, horas de hoy, sobrante medio) y salud del M5Dial (heap libre, RSSI WiFi, minutos encendido). |
+| **Eventos** | Arranques (con la causa del reinicio: `panic`, `task_wdt`, `brownout`…), cambios de estado del Beny, decisiones y órdenes del termo y la depuradora, resumen diario de la depuradora, conexiones y desconexiones de los relés y del Huawei, reconexiones WiFi, cambios de modo con el dial y todos los comandos de Telegram. |
+
+- Las pestañas se crean solas, con cabecera, en el primer envío.
+- Se envía **por lotes cada 5 min** con un `POST` JSON: una petición TLS por lote en vez de una por minuto, porque cada una para el bucle un par de segundos.
+- Si un envío falla, el lote se guarda (hasta 30 muestras y 40 eventos) y se reintenta. Solo cuenta como enviado un **302** de Apps Script: un 200 es la página de error de Google, por ejemplo con una implementación antigua sin `doPost`.
+- Los eventos aparecen también en el monitor serie como `EVENTO <tipo>: ...`.
+- `/diag` muestra el estado y el último envío; `/diag_on` y `/diag_off` lo activan y lo paran (se guarda en la NVS, clave `diag`). Viene **activado**.
+
+### Exportar a CSV
+
+`GOOGLE_SCRIPT_URL?export=Muestras&key=<EXPORT_KEY>&rows=N` devuelve las últimas N filas (20000 por defecto) en CSV; igual con `export=Eventos`. `EXPORT_KEY` se define en el script. Mientras tenga el valor por defecto, la exportación está desactivada.
+
+> Los datos dejan ver, por ejemplo, cuándo hay gente en casa: la URL del script y la clave no deben publicarse.
+
+### Desplegar el script
+
+En la hoja de cálculo, *Extensiones → Apps Script* (o desde [script.google.com/home](https://script.google.com/home)): pegar `google_apps_script.js`, cambiar `EXPORT_KEY`, guardar y en *Implementar → Gestionar implementaciones* editar la implementación existente con **Versión: nueva versión**. Así la URL no cambia. Una implementación nueva tendría otra URL.
 
 ## Hardware Necesario
 
@@ -379,6 +411,7 @@ Los siguientes valores se guardan en la memoria flash (NVS) del ESP32 y sobreviv
 | `p_mode` | int | Modo de la depuradora (0=AUTO, 1=ON, 2=OFF). |
 | `p_day`, `p_mon`, `p_run`, `p_def` | int | Día en curso, su mes, segundos de depuradora hoy y segundos pendientes de completar. |
 | `p_max0`…`p_max11`, `p_min0`…`p_min11` | float | Horas máximas y mínimas por mes, si se cambiaron por Telegram. |
+| `diag` | bool | Diagnóstico en Google Sheets activado. |
 
 En un equipo recién programado la NVS está vacía y el arranque muestra `nvs_open failed: NOT_FOUND`: es normal, se usan los valores por defecto hasta el primer guardado.
 

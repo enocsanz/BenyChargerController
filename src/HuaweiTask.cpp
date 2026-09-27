@@ -1,4 +1,5 @@
 #include "HuaweiTask.h"
+#include "GoogleSheetsTask.h"
 #include "config.h"
 #include <Arduino.h>
 #include <WiFi.h>
@@ -186,7 +187,7 @@ void loopHuawei() {
       Serial.println("Huawei: Connection not immediate. Waiting...");
       // Let's stay in CONNECTING for a bit before backoff to allow async connect
       if (millis() - stateEntryTime > 10000) {
-        Serial.println("Huawei: Connection timeout. Backing off.");
+        logEvent("HUAWEI", "Timeout de conexion, espera 10 s");
         changeState(H_BACKOFF);
       }
     }
@@ -194,13 +195,13 @@ void loopHuawei() {
 
   case H_READING:
     if (!mb.isConnected(inverterIp)) {
-      Serial.println("Huawei: Lost Connection.");
+      logEvent("HUAWEI", "Conexion perdida");
       changeState(H_BACKOFF); // Go to backoff to let socket clear
       return;
     }
 
     if (errorCount > MAX_ERRORS) {
-      Serial.println("Huawei: Too many errors. Reconnecting...");
+      logEvent("HUAWEI", "Demasiados errores Modbus, reconectando");
       mb.disconnect(inverterIp);
       changeState(H_BACKOFF);
       return;

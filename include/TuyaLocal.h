@@ -39,6 +39,7 @@ private:
   uint32_t _seq = 0;
   unsigned long _lastAttempt = 0;
   bool _attempted = false;
+  bool _failLogged = false;
   unsigned long _lastPoll = 0;
   unsigned long _lastRx = 0;
 

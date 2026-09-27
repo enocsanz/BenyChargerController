@@ -12,6 +12,7 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <esp_task_wdt.h>
+#include <esp_system.h>
 
 // WDT Timeout (seconds)
 #define WDT_TIMEOUT 30
@@ -167,6 +168,14 @@ void setup() {
 
   String modeStr = (charging_mode == 0) ? "SOLAR" : "BALANCEO";
   sendTelegramNotification("🚀 Sistema Iniciado. Modo actual: " + modeStr);
+
+  // Why we booted: a watchdog or panic reset here is worth knowing about
+  static const char *resetNames[] = {"desconocido", "encendido", "externo", "software",
+                                     "panic",       "int_wdt",   "task_wdt", "wdt",
+                                     "deepsleep",   "brownout",  "sdio"};
+  int rr = (int)esp_reset_reason();
+  logEvent("ARRANQUE", String("Reinicio: ") +
+                           (rr >= 0 && rr <= 10 ? resetNames[rr] : "?") + ", modo " + modeStr);
 }
 
 void runSmartChargingLogic() {
@@ -433,7 +442,7 @@ void loop() {
       charging_mode = (charging_mode + 1) % 2; // Now 2 modes (0=Solar, 1=Balanceo)
       saveMode(charging_mode);
       manual_logic_trigger = true;
-      Serial.printf("Button A Pressed: Mode set to %d\n", charging_mode);
+      logEventf("MODO", "Dial: modo %s", charging_mode == 0 ? "SOLAR" : "BALANCEO");
 
       String modeStr = (charging_mode == 0) ? "SOLAR" : "BALANCEO";
       sendTelegramNotification("🔘 M5Dial Botón: Modo cambiado a " + modeStr);
@@ -494,9 +503,8 @@ void loop() {
     }
   } else {
     if (wifiDownSince != 0) {
-      Serial.printf("WiFi: Reconectado tras %lus (%d reintentos). IP: %s\n",
-                    (millis() - wifiDownSince) / 1000, wifiRetries,
-                    WiFi.localIP().toString().c_str());
+      logEventf("WIFI", "Reconectado tras %lus (%d reintentos)", (millis() - wifiDownSince) / 1000,
+                wifiRetries);
       wifiDownSince = 0;
       wifiRetries = 0;
     }

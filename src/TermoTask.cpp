@@ -1,6 +1,7 @@
 #include "TermoTask.h"
 #include "BenyTask.h"
 #include "EsiosTask.h"
+#include "GoogleSheetsTask.h"
 #include "HuaweiTask.h"
 #include "TelegramTask.h"
 #include "TuyaLocal.h"
@@ -19,6 +20,8 @@ static const unsigned long MIN_OFF_TIME = 300000;     // 5 min
 static const unsigned long RESTORE_DELAY = 120000;    // 2 min
 // Grid reading older than this is not acted upon
 static const unsigned long GRID_STALE = 30000;
+// Without any grid reading for this long, switch on without the room check
+static const unsigned long GRID_WAIT = 300000;        // 5 min
 // Retry a relay command that did not take
 static const unsigned long CMD_RETRY = 10000;
 
@@ -101,7 +104,7 @@ void runTermoLogic() {
     overloadCut = true;
     cutNotified = true;
     cutTime = millis();
-    Serial.printf("Termo: Corte por sobrecarga (red %d W)\n", current_grid_power);
+    logEventf("TERMO", "Corte por sobrecarga (red %d W)", current_grid_power);
     sendTelegramNotification("⚠️ Termo cortado por sobrecarga: red " +
                              String(current_grid_power) + " W con el coche al minimo. "
                              "Vuelve cuando haya margen.");
@@ -115,7 +118,7 @@ void runTermoLogic() {
   if (overloadCut && millis() - cutTime > MIN_OFF_TIME && roomSince != 0 &&
       millis() - roomSince > RESTORE_DELAY) {
     overloadCut = false;
-    Serial.println("Termo: Hay margen, se reactiva");
+    logEvent("TERMO", "Hay margen, se reactiva");
     if (cutNotified) sendTelegramNotification("✅ Termo reactivado: vuelve a haber margen en la red.");
     cutNotified = false;
   }
@@ -127,17 +130,26 @@ void runTermoLogic() {
 
   // Being allowed again (price drops, back to AUTO/ON, boot) also needs room:
   // otherwise the heater would start right into an overload. Wait for room,
-  // without MIN_OFF_TIME. Only on that edge, so grid noise cannot bounce it.
+  // without MIN_OFF_TIME. Only on that edge, so grid noise cannot bounce it,
+  // and only with a grid reading: at boot, before the first one, "no reading"
+  // was taken for "no room" and flagged a false overload.
   static bool wasAllowed = false;
-  bool becameAllowed = allowed && !wasAllowed;
-  wasAllowed = allowed;
-  if (becameAllowed && !relay.switchOn && !overloadCut && !hasRoom) {
-    overloadCut = true;
-    cutTime = millis() - MIN_OFF_TIME;
-    Serial.println("Termo: Sin margen para encender, esperando");
+  if (gridFresh) {
+    bool becameAllowed = allowed && !wasAllowed;
+    wasAllowed = allowed;
+    if (becameAllowed && !relay.switchOn && !overloadCut && !hasRoom) {
+      overloadCut = true;
+      cutTime = millis() - MIN_OFF_TIME;
+      logEvent("TERMO", "Sin margen para encender, esperando");
+    }
   }
 
   bool desired = allowed && !overloadCut;
+
+  // No grid reading yet: do not switch on blind, but only for GRID_WAIT. If
+  // the inverter stays silent, the heater must not stay off because of it.
+  unsigned long gridAge = lastSampleTime ? millis() - lastSampleTime : millis();
+  if (desired && !relay.switchOn && !gridFresh && gridAge < GRID_WAIT) desired = false;
 
   TermoReason prev = reason;
   if (termo_mode == TERMO_OFF) reason = TR_MANUAL;
@@ -146,7 +158,7 @@ void runTermoLogic() {
   else reason = TR_ENABLED;
   if (reason != prev) {
     static const char *names[] = {"HABILITADO", "PRECIO", "SOBRECARGA", "MANUAL", "SIN CONEXION"};
-    Serial.printf("Termo: Estado %s (precio %.3f, umbral %.3f, red %d W)\n", names[reason], price,
+    logEventf("TERMO", "Estado %s (precio %.3f, umbral %.3f, red %d W)", names[reason], price,
                   termo_max_price, current_grid_power);
   }
 
@@ -158,7 +170,7 @@ void runTermoLogic() {
       (lastCmd == 0 || desired != lastSent || millis() - lastCmd > CMD_RETRY)) {
     lastCmd = millis();
     lastSent = desired;
-    Serial.printf("Termo: Rele -> %s (precio %.3f, red %d W)\n", desired ? "ON" : "OFF", price,
+    logEventf("TERMO", "Rele -> %s (precio %.3f, red %d W)", desired ? "ON" : "OFF", price,
                   current_grid_power);
     relay.setSwitch(desired);
   }

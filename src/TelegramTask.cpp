@@ -1,5 +1,6 @@
 #include "TelegramTask.h"
 #include "BenyTask.h"
+#include "GoogleSheetsTask.h"
 #include "PiscinaTask.h"
 #include "TermoTask.h"
 
@@ -53,6 +54,7 @@ void handleNewMessages(int numNewMessages) {
     String from_name = bot.messages[i].from_name;
     String textLower = text;
     textLower.toLowerCase();
+    logEvent("TELEGRAM", text);
 
     if (textLower == "/start" || textLower == "/help") {
       String msg = "Control Beny V2\n\n";
@@ -77,7 +79,10 @@ void handleNewMessages(int numNewMessages) {
       msg += "/piscina_auto - Con sol, con maximo y minimo diarios\n";
       msg += "/piscina_on - Encendida\n";
       msg += "/piscina_off - Apagada\n";
-      msg += "/set_piscina_horas MAX MIN - Horas de este mes (ej: /set_piscina_horas 6 3)\n";
+      msg += "/set_piscina_horas MAX MIN - Horas de este mes (ej: /set_piscina_horas 6 3)\n\n";
+      msg += "DIAGNOSTICO:\n";
+      msg += "/diag - Estado del registro en Google Sheets\n";
+      msg += "/diag_on /diag_off - Activa o para el registro por minuto\n";
       bot.sendMessage(chat_id, msg, "");
     } else if (textLower == "/status") {
       String msg = "📊 ESTADO DEL SISTEMA \n\n";
@@ -216,6 +221,15 @@ void handleNewMessages(int numNewMessages) {
         bot.sendMessage(chat_id, "Uso: /set_piscina_horas MAX MIN (horas, MIN <= MAX <= 24). "
                                  "Ej: /set_piscina_horas 6 3", "");
       }
+    } else if (textLower == "/diag") {
+      bot.sendMessage(chat_id, diagStatusText(), "");
+    } else if (textLower == "/diag_on" || textLower == "/diag on") {
+      setDiagEnabled(true);
+      bot.sendMessage(chat_id, "Diagnostico ACTIVO: una muestra por minuto y eventos a Google "
+                               "Sheets, enviados cada 5 min.", "");
+    } else if (textLower == "/diag_off" || textLower == "/diag off") {
+      setDiagEnabled(false);
+      bot.sendMessage(chat_id, "Diagnostico desactivado. El registro horario sigue.", "");
     } else if (textLower == "/off" || textLower == "/stop") {
       bot.sendMessage(chat_id, "❌ Comando /off desactivado (Modo 'Plug and Charge' activo en el cargador).", "");
     }

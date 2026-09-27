@@ -1,6 +1,7 @@
 #include "PiscinaTask.h"
 #include "BenyTask.h"
 #include "EsiosTask.h"
+#include "GoogleSheetsTask.h"
 #include "HuaweiTask.h"
 #include "TuyaLocal.h"
 #include "config.h"
@@ -146,8 +147,11 @@ void runPiscinaLogic() {
     bool yesterday = (t.tm_yday == day + 1) || (t.tm_yday == 0 && day >= 364);
     deficitSecs = yesterday ? max(0.0f, minHours[dayMon] * 3600 - runSecs) : 0;
     if (deficitSecs > 0) {
-      Serial.printf("Piscina: Ayer %.1f h de %.1f minimas, se completan %.1f h esta noche\n",
-                    runSecs / 3600, minHours[dayMon], deficitSecs / 3600);
+      logEventf("PISCINA", "Ayer %.1f h de %.1f minimas, se completan %.1f h esta noche",
+                runSecs / 3600, minHours[dayMon], deficitSecs / 3600);
+    } else if (yesterday) {
+      logEventf("PISCINA", "Ayer %.1f h (min %.1f, max %.1f)", runSecs / 3600, minHours[dayMon],
+                maxHours[dayMon]);
     }
     day = t.tm_yday;
     dayMon = t.tm_mon;
@@ -190,7 +194,7 @@ void runPiscinaLogic() {
     if (t.tm_hour < FILL_END_HOUR) {
       fill = isCheapHour(t.tm_hour, (int)ceilf(deficitSecs / 3600));
     } else {
-      Serial.printf("Piscina: Quedan %.1f h sin completar, se descartan\n", deficitSecs / 3600);
+      logEventf("PISCINA", "Quedan %.1f h sin completar, se descartan", deficitSecs / 3600);
       deficitSecs = 0;
       save();
     }
@@ -203,14 +207,14 @@ void runPiscinaLogic() {
     if (haveAvg && gridFresh && runSecs < maxSecs && surplusAvg >= pumpWatts + START_MARGIN &&
         (!relay.switchOn ? inState >= MIN_OFF : true)) {
       solarRun = true;
-      Serial.printf("Piscina: Arranque con sol (excedente medio %.0f W)\n", surplusAvg);
+      logEventf("PISCINA", "Arranque con sol (excedente medio %.0f W)", surplusAvg);
     }
   } else {
     bool maxReached = runSecs >= maxSecs;
     bool noSun = inState >= MIN_ON && surplusAvg < pumpWatts * STOP_FRACTION;
     if (maxReached || noSun) {
       solarRun = false;
-      Serial.printf("Piscina: Parada (%s, excedente medio %.0f W, hoy %.1f h)\n",
+      logEventf("PISCINA", "Parada (%s, excedente medio %.0f W, hoy %.1f h)",
                     maxReached ? "maximo diario" : "sin sol", surplusAvg, runSecs / 3600);
     }
   }
@@ -249,7 +253,7 @@ void runPiscinaLogic() {
       (lastCmd == 0 || desired != lastSent || millis() - lastCmd > CMD_RETRY)) {
     lastCmd = millis();
     lastSent = desired;
-    Serial.printf("Piscina: Rele -> %s (excedente medio %.0f W, hoy %.1f h)\n",
+    logEventf("PISCINA", "Rele -> %s (excedente medio %.0f W, hoy %.1f h)",
                   desired ? "ON" : "OFF", surplusAvg, runSecs / 3600);
     relay.setSwitch(desired);
   }

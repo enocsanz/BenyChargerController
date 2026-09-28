@@ -20,7 +20,7 @@ void loopEsios() {
   // Also refetch as soon as the day changes: the table holds a single day, and
   // right after midnight it would otherwise serve yesterday's prices.
   struct tm now;
-  bool newDay = getLocalTime(&now, 0) && now.tm_yday != esios_prices.yday;
+  bool newDay = timeNow(&now) && now.tm_yday != esios_prices.yday;
   bool due = millis() - esios_prices.lastUpdate > priceUpdateInterval ||
              esios_prices.lastUpdate == 0 || newDay;
 
@@ -50,7 +50,7 @@ void loopEsios() {
 
       // To do it right, we need time.
       struct tm timeinfo;
-      if (!getLocalTime(&timeinfo, 0)) {
+      if (!timeNow(&timeinfo)) {
         Serial.println("Failed to obtain time");
         return;
       }
@@ -105,11 +105,21 @@ void loopEsios() {
   }
 }
 
-// Timeout 0: without NTP, getLocalTime() would otherwise wait 5s on every
-// call, and this runs on every screen refresh.
+// timeNow(&t) is not "no wait": it loops while millis() - start <= 0,
+// so when millis() ticks between its two reads it never looks at the clock and
+// returns false with the time perfectly set. That made the price read as
+// unknown for a second every few minutes, and the heater and the pool pump
+// switched on and off with it. Plain time() has no such race. (The default
+// timeout is no option either: without NTP it waits 5s on every call.)
+bool timeNow(struct tm *t) {
+  time_t now = time(nullptr);
+  localtime_r(&now, t);
+  return t->tm_year > (2016 - 1900);
+}
+
 float getPriceAt(int hour) {
   struct tm timeinfo;
-  if (getLocalTime(&timeinfo, 0) && timeinfo.tm_yday == esios_prices.yday && hour >= 0 &&
+  if (timeNow(&timeinfo) && timeinfo.tm_yday == esios_prices.yday && hour >= 0 &&
       hour < 24 && esios_prices.valid[hour]) {
     return esios_prices.prices[hour];
   }
@@ -118,6 +128,6 @@ float getPriceAt(int hour) {
 
 float getCurrentPrice() {
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo, 0)) return -1.0;
+  if (!timeNow(&timeinfo)) return -1.0;
   return getPriceAt(timeinfo.tm_hour);
 }

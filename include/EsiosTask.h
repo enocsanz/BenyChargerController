@@ -29,6 +29,9 @@ extern PriceState esios_prices;
 void setupEsios();
 void loopEsios();
 float getCurrentPrice();
+// Local time right now, without waiting; false until NTP has set the clock.
+// Use this instead of getLocalTime(&t, 0), which fails at random (see .cpp).
+bool timeNow(struct tm *t);
 // Today's price for an hour (0-23), -1 if unknown
 float getPriceAt(int hour);
 

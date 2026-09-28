@@ -79,7 +79,7 @@ void setPiscinaMode(int mode) {
 
 bool setPiscinaHours(float maxH, float minH) {
   struct tm t;
-  if (!getLocalTime(&t, 0) || maxH < 0 || maxH > 24 || minH < 0 || minH > maxH) return false;
+  if (!timeNow(&t) || maxH < 0 || maxH > 24 || minH < 0 || minH > maxH) return false;
   maxHours[t.tm_mon] = maxH;
   minHours[t.tm_mon] = minH;
   char key[8];
@@ -142,7 +142,7 @@ void runPiscinaLogic() {
 
   // --- Day change: work out yesterday's shortfall ---
   struct tm t;
-  bool haveTime = getLocalTime(&t, 0);
+  bool haveTime = timeNow(&t);
   if (haveTime && t.tm_yday != day) {
     bool yesterday = (t.tm_yday == day + 1) || (t.tm_yday == 0 && day >= 364);
     deficitSecs = yesterday ? max(0.0f, minHours[dayMon] * 3600 - runSecs) : 0;
@@ -262,7 +262,7 @@ void runPiscinaLogic() {
 PiscinaStatus getPiscinaStatus() {
   PiscinaStatus s;
   struct tm t;
-  int mon = getLocalTime(&t, 0) ? t.tm_mon : dayMon;
+  int mon = timeNow(&t) ? t.tm_mon : dayMon;
   s.online = relay.connected() && relay.lastUpdate != 0;
   s.relayOn = relay.switchOn;
   s.power = relay.power;

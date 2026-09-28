@@ -96,7 +96,7 @@ El termo tiene su propio termostato mecánico. Delante lleva un relé de carril 
 | **Vuelta tras sobrecarga** | Al menos **5 min** cortado y **2 min seguidos** con sitio para el termo | Relé cerrado. Aviso por Telegram. |
 | **Aviso de sobrecarga sin salida** | Media de red del último minuto > `CONTRACTED_POWER` + 200 W durante **3 min**, con el coche al mínimo (o sin cargar) y el termo sin consumo | 🚨 Aviso por Telegram: ya no queda nada que cortar, hay que apagar algo o parar el coche. Otro aviso cuando la media vuelve bajo el límite 2 min. |
 | **Encendido con sitio** | Al volver a estar permitido (baja el precio, `/termo_auto`, arranque) | Solo se cierra si el termo cabe; si no, espera a que haya sitio. Sin lectura de red todavía (arranque), espera hasta 5 min por ella y después se cierra igualmente. |
-| **Sin precio** | ESIOS no responde o no hay hora | El precio **no bloquea**: mejor una hora cara que quedarse sin agua caliente. |
+| **Sin precio** | ESIOS no responde o no hay hora durante más de **10 min** | El precio **no bloquea**: mejor una hora cara que quedarse sin agua caliente. Un hueco más corto mantiene el último precio conocido. |
 
 **El coche cede primero.** Si no cabe todo, el DLB baja el coche hasta 6A. El termo solo se corta si con el coche al mínimo sigue habiendo sobrecarga (el horno, la vitro, el secador…). Los picos cortos no cuentan, porque la distribuidora los tolera.
 

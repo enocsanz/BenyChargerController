@@ -22,6 +22,8 @@ static const unsigned long RESTORE_DELAY = 120000;    // 2 min
 static const unsigned long GRID_STALE = 30000;
 // Without any grid reading for this long, switch on without the room check
 static const unsigned long GRID_WAIT = 300000;        // 5 min
+// Last known price kept through a gap this long
+static const unsigned long PRICE_HOLD = 600000;       // 10 min
 // Retry a relay command that did not take
 static const unsigned long CMD_RETRY = 10000;
 
@@ -181,7 +183,18 @@ void runTermoLogic() {
   }
 
   // --- Desired state ---
-  float price = getCurrentPrice(); // -1 if unknown: then the price never blocks
+  // -1 if unknown: then the price never blocks. A brief gap keeps the last
+  // known price for PRICE_HOLD, so only a real ESIOS outage lets it through:
+  // a one-second "unknown" used to switch the heater on and off again.
+  float price = getCurrentPrice();
+  static float lastPrice = -1;
+  static unsigned long lastPriceAt = 0;
+  if (price >= 0) {
+    lastPrice = price;
+    lastPriceAt = millis();
+  } else if (lastPriceAt != 0 && millis() - lastPriceAt < PRICE_HOLD) {
+    price = lastPrice;
+  }
   bool priceBlock = termo_mode == TERMO_AUTO && price >= 0 && price > termo_max_price;
   bool allowed = termo_mode != TERMO_OFF && !priceBlock;
 

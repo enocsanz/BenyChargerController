@@ -1,5 +1,6 @@
 #include "GoogleSheetsTask.h"
 #include "BenyTask.h"
+#include "EsiosTask.h"
 #include "HuaweiTask.h"
 #include "PiscinaTask.h"
 #include "TermoTask.h"
@@ -57,7 +58,7 @@ static String jsonStr(const String &s) {
 static String stamp() {
   struct tm t;
   char buf[32];
-  if (getLocalTime(&t, 0)) strftime(buf, sizeof(buf), "\"%d/%m/%Y\",\"%H:%M:%S\"", &t);
+  if (timeNow(&t)) strftime(buf, sizeof(buf), "\"%d/%m/%Y\",\"%H:%M:%S\"", &t);
   else snprintf(buf, sizeof(buf), "\"sin hora\",\"+%lus\"", millis() / 1000);
   return buf;
 }
@@ -152,7 +153,7 @@ static void sendBatch() {
 
   char when[12];
   struct tm t;
-  if (getLocalTime(&t, 0)) strftime(when, sizeof(when), "%H:%M", &t);
+  if (timeNow(&t)) strftime(when, sizeof(when), "%H:%M", &t);
   else strcpy(when, "?");
 
   if (code == 302) {
@@ -217,7 +218,7 @@ void loopGoogleSheets() {
     lastSheetsCheck = millis();
 
     struct tm timeinfo;
-    if (!getLocalTime(&timeinfo, 0))
+    if (!timeNow(&timeinfo))
       return;
 
     // Condition: Hourly logging (Minute == 0)

@@ -22,6 +22,8 @@ static const unsigned long RESTORE_DELAY = 120000;    // 2 min
 static const unsigned long GRID_STALE = 30000;
 // Without any grid reading for this long, switch on without the room check
 static const unsigned long GRID_WAIT = 300000;        // 5 min
+// Relay's own countdown while cut: back on by itself if the M5Dial stops
+static const uint32_t FAILSAFE_SECS = 900;            // 15 min
 // Last known price kept through a gap this long
 static const unsigned long PRICE_HOLD = 600000;       // 10 min
 // Retry a relay command that did not take
@@ -243,6 +245,12 @@ void runTermoLogic() {
     logEventf("TERMO", "Rele -> %s (precio %.3f, red %d W)", desired ? "ON" : "OFF", price,
                   current_grid_power);
     relay.setSwitch(desired);
+  } else if (desired == relay.switchOn) {
+    // While cut (price or overload) the relay counts down FAILSAFE_SECS and
+    // switches back on by itself if this controller stops: a dead M5Dial
+    // must not leave the house without hot water. Not with TERMO_OFF, which
+    // is the user's own choice.
+    relay.keepFailsafe(!desired && termo_mode != TERMO_OFF ? FAILSAFE_SECS : 0);
   }
 }
 

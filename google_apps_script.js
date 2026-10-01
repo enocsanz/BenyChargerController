@@ -4,8 +4,14 @@
 //  - doPost {samples, events}    diagnostic batch -> "Muestras" / "Eventos"
 //  - doGet  ?export=Muestras&key=...&rows=N   last N rows as CSV
 //
+//  - checkWatchdog (timer)       Telegram alert when the M5Dial goes silent
+//
 // After pasting it: Deploy > Manage deployments > edit > Version: New version.
 // The URL stays the same, so the firmware does not need to change.
+//
+// Watchdog, once: Project Settings > Script properties: TELEGRAM_TOKEN and
+// TELEGRAM_CHAT (BOT_TOKEN and CHAT_ID from config.h). Then run setupWatchdog
+// from the editor (it asks for permissions) and, to check, testTelegram.
 
 // Key for the CSV export. Change it: anyone with the script URL and this key
 // can read the data. While it is left as is, the export is disabled.
@@ -50,6 +56,8 @@ function doPost(e) {
   lock.waitLock(20000); // batches must not interleave
   try {
     var data = JSON.parse(e.postData.contents);
+    // For the watchdog: every batch, even an empty one, is a sign of life
+    PropertiesService.getScriptProperties().setProperty('lastPost', String(Date.now()));
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     appendRows(sheetFor(ss, 'Muestras', SAMPLE_HEADERS), data.samples || [], 2); // date, time
     appendRows(sheetFor(ss, 'Eventos', EVENT_HEADERS), data.events || [], 4);    // all columns
@@ -119,4 +127,65 @@ function exportCsv(params) {
     }).join(',');
   }).join('\n');
   return ContentService.createTextOutput(csv).setMimeType(ContentService.MimeType.CSV);
+}
+
+// --- Watchdog -------------------------------------------------------------
+// The M5Dial sends a batch every 5 min. If nothing arrives for WATCHDOG_MIN,
+// it is down (power, WiFi, hang): nothing controls the car, the heater or the
+// pool any more, so the user is told on Telegram, and again when it is back.
+// The relays protect themselves meanwhile with their own countdown.
+var WATCHDOG_MIN = 20;
+
+function checkWatchdog() {
+  var props = PropertiesService.getScriptProperties();
+  var last = parseInt(props.getProperty('lastPost') || '0', 10);
+  if (!last) return; // nothing received yet
+  var silentMin = (Date.now() - last) / 60000;
+  var alerted = props.getProperty('wdAlerted') === '1';
+  var when = Utilities.formatDate(new Date(last), 'Europe/Madrid', 'dd/MM HH:mm');
+
+  if (!alerted && silentMin > WATCHDOG_MIN) {
+    if (sendTelegram('⚠️ El M5Dial no envia datos desde las ' + when + ' (hace ' +
+                     Math.round(silentMin) + ' min). Puede estar sin alimentacion o sin ' +
+                     'WiFi: nadie controla el coche. El termo y la depuradora vuelven a su ' +
+                     'estado seguro solos en 15 min.')) {
+      props.setProperty('wdAlerted', '1');
+      props.setProperty('wdSince', String(last));
+    }
+  } else if (alerted && silentMin <= WATCHDOG_MIN) {
+    var since = parseInt(props.getProperty('wdSince') || String(last), 10);
+    var downMin = Math.round((last - since) / 60000);
+    if (sendTelegram('✅ El M5Dial vuelve a enviar datos (unos ' + downMin + ' min sin senal).')) {
+      props.setProperty('wdAlerted', '0');
+    }
+  }
+}
+
+function sendTelegram(text) {
+  var props = PropertiesService.getScriptProperties();
+  var token = props.getProperty('TELEGRAM_TOKEN');
+  var chat = props.getProperty('TELEGRAM_CHAT');
+  if (!token || !chat) {
+    console.log('Watchdog: missing TELEGRAM_TOKEN / TELEGRAM_CHAT in Script properties');
+    return false;
+  }
+  var r = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+    method: 'post', payload: { chat_id: chat, text: text }, muteHttpExceptions: true
+  });
+  console.log('Telegram: ' + r.getResponseCode() + ' ' + r.getContentText().substring(0, 200));
+  return r.getResponseCode() === 200;
+}
+
+// Run once from the editor: installs the 5-minute timer (replacing any old one)
+function setupWatchdog() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'checkWatchdog') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('checkWatchdog').timeBased().everyMinutes(5).create();
+  console.log('Watchdog installed: every 5 min, alert after ' + WATCHDOG_MIN + ' min of silence');
+}
+
+// Run from the editor to check the Telegram settings
+function testTelegram() {
+  sendTelegram('🔔 Prueba del vigilante del M5Dial: los avisos llegaran a este chat.');
 }

@@ -361,12 +361,36 @@ void TuyaLocal::loop() {
   }
 }
 
-bool TuyaLocal::setSwitch(bool on) {
+bool TuyaLocal::sendDps(const char *dps) {
   if (!_ready) return false;
   // CONTROL_NEW payload: "3.x" + 12 zero bytes, then the JSON
   uint8_t payload[160] = {'3', '.', (uint8_t)('0' + _version % 10)};
   int n = snprintf((char *)payload + 15, sizeof(payload) - 15,
-                   "{\"protocol\":5,\"t\":%lu,\"data\":{\"dps\":{\"1\":%s}}}",
-                   (unsigned long)time(nullptr), on ? "true" : "false");
+                   "{\"protocol\":5,\"t\":%lu,\"data\":{\"dps\":{%s}}}",
+                   (unsigned long)time(nullptr), dps);
   return send(CMD_CONTROL, payload, 15 + n);
+}
+
+bool TuyaLocal::setSwitch(bool on) {
+  // Switching may clear the relay's countdown: re-arm it on the next tick
+  _fsSecs = UINT32_MAX;
+  return sendDps(on ? "\"1\":true" : "\"1\":false");
+}
+
+void TuyaLocal::keepFailsafe(uint32_t secs) {
+  if (!_ready) return;
+  bool changed = secs != _fsSecs;
+  bool due = secs > 0 && millis() - _fsAt > secs * 1000UL / 3;
+  if (!changed && !due) return;
+
+  char dps[24];
+  snprintf(dps, sizeof(dps), "\"9\":%u", secs);
+  if (!sendDps(dps)) return;
+  if (changed) {
+    if (secs) logEventf("TUYA", "%s: seguro activado (%u min sin el M5Dial -> cambia solo)", _name,
+                        secs / 60);
+    else if (_fsSecs != UINT32_MAX) logEventf("TUYA", "%s: seguro desactivado", _name);
+  }
+  _fsSecs = secs;
+  _fsAt = millis();
 }

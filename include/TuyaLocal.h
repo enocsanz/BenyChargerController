@@ -17,6 +17,11 @@ public:
   void loop();             // Call often. Only (re)connecting blocks, <~7s.
   bool setSwitch(bool on); // false if there is no session
   bool connected() const { return _ready; }
+  // Dead man's switch on the relay's own countdown (DP 9): when it runs out
+  // the relay flips by itself. While secs > 0 it is re-armed every secs/3, so
+  // it only runs out if this controller stops; secs = 0 disarms it. Call it on
+  // every logic tick, once the relay is where it should be.
+  void keepFailsafe(uint32_t secs);
 
   // Last values reported by the device (DP 1, 19, 20, 18)
   bool switchOn = false;
@@ -40,6 +45,8 @@ private:
   unsigned long _lastAttempt = 0;
   bool _attempted = false;
   bool _failLogged = false;
+  uint32_t _fsSecs = UINT32_MAX; // countdown last armed; MAX = unknown
+  unsigned long _fsAt = 0;
   unsigned long _lastPoll = 0;
   unsigned long _lastRx = 0;
 
@@ -50,6 +57,7 @@ private:
   bool connect();
   void close(const char *why);
   bool send(uint32_t cmd, const uint8_t *payload, size_t len);
+  bool sendDps(const char *dps); // CONTROL_NEW with {"dps":{...}}
   bool send34(uint32_t cmd, const uint8_t *payload, size_t len);
   bool send35(uint32_t cmd, const uint8_t *payload, size_t len);
   void pump();

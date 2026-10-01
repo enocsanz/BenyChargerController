@@ -137,7 +137,16 @@ Después la suscripción a la nube puede caducar, porque el M5Dial no la usa. La
 
 > ⚠️ Dale a cada relé una **IP fija por DHCP** en el router. El M5Dial se conecta a `TERMO_IP` / `PISCINA_IP`: si el router le cambia la IP, deja de encontrarlo.
 
-> Si el M5Dial o la WiFi fallan, el relé se queda en su último estado. El relé está configurado para recordar su estado tras un corte de luz (`relay_status = memory`) y no tiene temporizadores propios que se peleen con el M5Dial.
+### Seguro si el M5Dial deja de funcionar
+
+Los relés tienen una **cuenta atrás propia** (DP 9, `countdown_1`): cuando llega a cero, el relé **invierte su estado él solo**, sin el M5Dial (comprobado: apagado + cuenta atrás de 10 s → se encendió a los 9 s). El M5Dial la usa como *dead man's switch* (`TuyaLocal::keepFailsafe`):
+
+| Relé | Cuándo se arma | Si el M5Dial deja de renovarla |
+|------|----------------|--------------------------------|
+| **Termo** | Mientras está cortado (precio o sobrecarga), salvo con `/termo_off` | Se **enciende** solo: no os quedáis sin agua caliente. |
+| **Depuradora** | Mientras funciona en `AUTO` | Se **apaga** sola: no sigue funcionando horas sin control. |
+
+La cuenta atrás es de **15 min** y se renueva cada 5 min, así que solo llega a cero si el M5Dial lleva más de 10 min sin poder hablar con el relé. Los cambios de armado quedan en Eventos (`seguro activado` / `seguro desactivado`). El termo está configurado para recordar su estado tras un corte de luz (`relay_status = memory`), y ningún relé tiene temporizadores propios en la app.
 
 ## Depuradora de la Piscina
 
@@ -360,6 +369,15 @@ Registro detallado para analizar durante unos días el funcionamiento de todo el
 `GOOGLE_SCRIPT_URL?export=Muestras&key=<EXPORT_KEY>&rows=N` devuelve las últimas N filas (20000 por defecto) en CSV; igual con `export=Eventos`. `EXPORT_KEY` se define en el script. Mientras tenga el valor por defecto, la exportación está desactivada.
 
 > Los datos dejan ver, por ejemplo, cuándo hay gente en casa: la URL del script y la clave no deben publicarse.
+
+### Vigilante (aviso si el M5Dial deja de dar señales)
+
+El script apunta la hora de cada lote recibido (también los vacíos). Un temporizador de Google ejecuta `checkWatchdog` cada 5 min: si llevan **más de 20 min sin llegar datos**, manda un Telegram ("⚠️ El M5Dial no envía datos desde las …"), y otro cuando vuelven. Con `/diag_off` el M5Dial sigue mandando cada 5 min un lote vacío como señal de vida, para que el vigilante no dé falsas alarmas.
+
+Configuración, una sola vez, en el editor de Apps Script:
+
+1. *Configuración del proyecto → Propiedades de la secuencia de comandos*: añadir `TELEGRAM_TOKEN` y `TELEGRAM_CHAT` (los mismos `BOT_TOKEN` y `CHAT_ID` de `config.h`). Van ahí y no en el código, para que el token no acabe en el repositorio.
+2. Ejecutar `setupWatchdog` (instala el temporizador; Google pide permisos) y, para probar, `testTelegram`.
 
 ### Desplegar el script
 

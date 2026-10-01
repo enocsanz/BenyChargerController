@@ -170,7 +170,18 @@ static void sendBatch() {
 }
 
 static void loopDiag() {
-  if (!diag_enabled) return;
+  static unsigned long lastSend = 0;
+  bool sendDue = millis() - lastSend >= SEND_INTERVAL && WiFi.status() == WL_CONNECTED;
+
+  if (!diag_enabled) {
+    // Still an (empty) batch now and then, as a heartbeat: the script's
+    // watchdog alerts on Telegram when nothing arrives for a while.
+    if (sendDue) {
+      lastSend = millis();
+      sendBatch();
+    }
+    return;
+  }
 
   // Grid extremes within the minute, from every fresh reading
   static uint32_t lastGridSample = 0;
@@ -194,9 +205,7 @@ static void loopDiag() {
     takeSample();
   }
 
-  static unsigned long lastSend = 0;
-  if ((sampleCount || eventCount) && millis() - lastSend >= SEND_INTERVAL &&
-      WiFi.status() == WL_CONNECTED) {
+  if (sendDue) {
     lastSend = millis();
     sendBatch();
   }

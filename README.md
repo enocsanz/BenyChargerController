@@ -156,7 +156,7 @@ El sobrante se promedia (media móvil exponencial de **5 min**) para que una nub
 | **Arranque** | Sobrante medio ≥ `PISCINA_POWER` + 100 W (500 W), parada desde hace ≥ 15 min y por debajo del máximo de hoy. |
 | **Parada** | Sobrante medio < 50 % de `PISCINA_POWER` (200 W) tras ≥ 30 min encendida, o máximo de hoy cumplido. |
 | **Mínimo** | Si un día no llega al mínimo, lo que falte se completa **esa madrugada (00-08 h) en las horas más baratas** (PVPC). Sin precios, se completa en cuanto empieza la madrugada. Lo no completado a las 08 h se descarta. |
-| **Arranque del M5Dial** | Si el relé está encendido, cuenta como recién encendido (se le respetan los 30 min); si está apagado, puede arrancar sin esperar. |
+| **Arranque del M5Dial** | Si el relé está encendido, se adopta como funcionamiento con sol recién empezado: se le respetan los 30 min y solo se para por las reglas normales (sobrante < 200 W o máximo diario), aunque el sobrante no llegue al umbral de arranque. Si está apagado, puede arrancar sin esperar. |
 
 `PISCINA_POWER` es **fijo (400 W)**: el motor es de velocidad variable y cambia de consumo cada cierto tiempo (se han medido 150-460 W), así que aprender la potencia movería los umbrales.
 

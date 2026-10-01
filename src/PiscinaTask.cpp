@@ -134,6 +134,13 @@ void runPiscinaLogic() {
     // started (it gets its MIN_ON, a reboot must not cycle it), a stopped one
     // may start right away.
     lastChange = (seen || relay.switchOn) ? millis() : millis() - MIN_OFF;
+    // ...and it is adopted as a solar run, so only the normal stop rules
+    // apply. Otherwise, below the START threshold, it was stopped right away
+    // (seen: running at 389 W of surplus, stopped 2 min after a reboot).
+    if (!seen && relay.switchOn && piscina_mode == PISCINA_AUTO) {
+      solarRun = true;
+      logEvent("PISCINA", "Encendida al arrancar: se mantiene con las reglas normales");
+    }
     lastOn = relay.switchOn;
     seen = true;
     save();

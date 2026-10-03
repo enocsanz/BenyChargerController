@@ -19,3 +19,6 @@ tuya-raw.json
 
 # PlatformIO local secrets (OTA password)
 secrets.ini
+
+# Backup of all passwords and tokens (never commit)
+CLAVES_PROYECTO_BENY.txt

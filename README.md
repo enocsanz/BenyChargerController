@@ -216,6 +216,7 @@ Una unidad **M5Stack ENV III** (SHT30 de temperatura y humedad en 0x44, QMP6988 
 | Blanco, SCL | **G15** |
 
 - Al arrancar prueba primero G13/G15; si no responde, prueba las parejas de pines libres (sin G0, G3, G19/G20, G21, G26-G37, G45/G46) y guarda la que encuentra (NVS `env_sda` / `env_scl`). El resultado llega por Telegram.
+- Bus a **20 kHz** (a 100 kHz fallaba a ratos: sin conector Grove, el bus puede depender de las pull-ups internas del ESP32, muy débiles) y orden de medida con hasta 3 reintentos.
 - Lee cada 30 s. `/status` lo muestra en la línea `🌡️ Ambiente`; si no hay lectura, dice en qué paso falla.
 - Cada medida trae un CRC-8 que se comprueba: con un contacto flojo llegó a leer −45,0 °C y 100 % (todo ceros y todo unos), y ahora esas lecturas se descartan.
 - **`/i2c`** diagnostica el bus: nivel en reposo de SDA y SCL (deben ser 1), direcciones que responden (deben ser 0x44 y 0x70; si responden todas, hay una línea bloqueada) y el código de la orden de medida.

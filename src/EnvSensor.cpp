@@ -9,6 +9,10 @@ extern void sendTelegramNotification(String msg);
 static const uint8_t SHT30_ADDR = 0x44;
 static const uint8_t QMP6988_ADDR = 0x70;
 static const unsigned long READ_INTERVAL = 30000;
+// Slow bus: the StampS3 has no Grove socket and maybe no pull-ups, so the
+// lines may hang on the ESP32's weak internal ones (~45k). At 100 kHz the
+// SHT30 answered only now and then; it works at any speed down to 0.
+static const uint32_t I2C_HZ = 20000;
 
 // Free StampS3 pins that may carry the I2C wires. Left out: G0 (button and
 // boot), G3/G45/G46 (boot strapping), G19/G20 (USB), G21 (LED), G26-G37 (flash).
@@ -26,7 +30,7 @@ static bool probe(uint8_t addr) {
 
 static bool tryPins(int sda, int scl) {
   Wire.end();
-  if (!Wire.begin(sda, scl, 100000)) return false;
+  if (!Wire.begin(sda, scl, I2C_HZ)) return false;
   Wire.setTimeOut(20);
   return probe(SHT30_ADDR);
 }
@@ -66,7 +70,7 @@ String envI2cDiag() {
   int sda = digitalRead(sdaPin), scl = digitalRead(sclPin);
   msg += "   En reposo: SDA=" + String(sda) + ", SCL=" + String(scl) +
          (sda && scl ? " (bien)" : " (deberian ser 1: linea a masa o sin resistencias)") + "\n";
-  Wire.begin(sdaPin, sclPin, 100000);
+  Wire.begin(sdaPin, sclPin, I2C_HZ);
   Wire.setTimeOut(20);
   String found;
   int count = 0;
@@ -89,8 +93,13 @@ String envI2cDiag() {
 // The SHT30 NACKs the read until the measurement is done (up to 15 ms): poll
 // a few times instead of a single read at a fixed delay.
 static bool readSht30() {
-  if (!command(0x24, 0x00)) {
-    lastError = "no acepta la orden de medida";
+  bool sent = false;
+  for (int i = 0; i < 3 && !sent; i++) {
+    if (i) delay(5);
+    sent = command(0x24, 0x00);
+  }
+  if (!sent) {
+    lastError = "no acepta la orden de medida (codigo " + String(lastCmdCode) + ")";
     return false;
   }
   int got = 0;

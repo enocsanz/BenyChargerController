@@ -204,6 +204,22 @@ Junto al termo, en otra planta, la temperatura del agua (sonda DS18B20, pendient
 - **Cambio de punto (*roaming*)**: aun así, el escaneo del arranque a veces no oye el punto cercano (tras una OTA el StampS3 se quedó en −81 con el de la caseta a −46), y el ESP32 nunca cambia de punto por su cuenta. Con señal por debajo de −70 dBm, cada 5 min (la primera, al minuto de arrancar) escanea en segundo plano y se pasa a un punto al menos 10 dB mejor; queda en Eventos (`WIFI: Cambio de punto de acceso`). Código común en `include/WifiRoam.h`.
 - **Firmware de la sonda**: carpeta `sonda/` (proyecto PlatformIO propio). La primera vez por USB (`cd sonda && pio run -t upload`); después por WiFi (`pio run -e m5stickcplus_ota -t upload`, nombre `beny-sonda.local`; conviene fijarle la IP en el router). Usa la WiFi y la contraseña OTA de `include/config.h` y `secrets.ini`.
 
+## Sensor de Ambiente (ENV III) en el StampS3
+
+Una unidad **M5Stack ENV III** (SHT30 de temperatura y humedad en 0x44, QMP6988 de presión en 0x70) mide la temperatura y la humedad de la caseta. El StampS3 no tiene conector Grove, así que va con un cable Grove a Dupont:
+
+| Grove (ENV III) | StampS3 |
+|---|---|
+| Rojo, 5V | 5V |
+| Negro, GND | G (GND) |
+| Amarillo, SDA | **G13** |
+| Blanco, SCL | **G15** |
+
+- Al arrancar prueba primero G13/G15; si no responde, prueba las parejas de pines libres (sin G0, G3, G19/G20, G21, G26-G37, G45/G46) y guarda la que encuentra (NVS `env_sda` / `env_scl`). El resultado llega por Telegram.
+- Lee cada 30 s. `/status` lo muestra en la línea `🌡️ Ambiente`; si no hay lectura, dice en qué paso falla.
+- Cada medida trae un CRC-8 que se comprueba: con un contacto flojo llegó a leer −45,0 °C y 100 % (todo ceros y todo unos), y ahora esas lecturas se descartan.
+- **`/i2c`** diagnostica el bus: nivel en reposo de SDA y SCL (deben ser 1), direcciones que responden (deben ser 0x44 y 0x70; si responden todas, hay una línea bloqueada) y el código de la orden de medida.
+
 ## Reconexión WiFi
 
 `WiFi.setAutoReconnect(true)` por sí solo no siempre recupera al ESP32 cuando el punto de acceso desaparece un rato, así que la reconexión es **escalonada y no bloqueante**:
@@ -289,6 +305,7 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 |---------|-------------|
 | `/diag` | Estado del registro en Google Sheets: pendiente de enviar y resultado del último envío (con su duración: la conexión TLS es lo primero que notaría una CPU más lenta). |
 | `/sonda` | Enlace con la sonda del termo: % de mensajes recibidos (último minuto y total), vía (WiFi o ESP-NOW) y último mensaje. |
+| `/i2c` | Diagnóstico del bus I²C del sensor de ambiente: niveles de SDA/SCL, direcciones que responden y resultado de la orden de medida. |
 | `/version` | Versión del firmware (fecha y hora de compilación), IP y cómo actualizarlo; lo mismo de la sonda del termo. |
 | `/wifi` | Intensidad de la señal WiFi del controlador (dBm y valoración: buena > −67, aceptable > −75, justa > −80), red, canal e IP. También la señal de la sonda del termo. |
 | `/diag_on` / `/diag_off` | Activa o para el registro por minuto y de eventos. |

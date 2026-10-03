@@ -3,6 +3,7 @@
 #include "GoogleSheetsTask.h"
 #include "PiscinaTask.h"
 #include "SondaLink.h"
+#include "EnvSensor.h"
 #include "TermoTask.h"
 
 // #include "WeatherTask.h" REMOVED
@@ -151,6 +152,7 @@ void handleNewMessages(int numNewMessages) {
       msg += "\n" + termoStatusText() + "\n";
       msg += "\n" + piscinaStatusText() + "\n";
       msg += "\n" + sondaShortText() + "\n";
+      msg += envText() + "\n";
       msg += "\n" + systemText() + "\n";
 
       bot.sendMessage(chat_id, msg, "");
@@ -257,6 +259,8 @@ void handleNewMessages(int numNewMessages) {
         bot.sendMessage(chat_id, "Uso: /set_piscina_horas MAX MIN (horas, MIN <= MAX <= 24). "
                                  "Ej: /set_piscina_horas 6 3", "");
       }
+    } else if (textLower == "/i2c") {
+      bot.sendMessage(chat_id, envI2cDiag(), "");
     } else if (textLower == "/sonda") {
       bot.sendMessage(chat_id, sondaLinkText(), "");
     } else if (textLower == "/version") {

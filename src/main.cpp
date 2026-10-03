@@ -6,6 +6,7 @@
 #include "TermoTask.h"
 #include "PiscinaTask.h"
 #include "SondaLink.h"
+#include "EnvSensor.h"
 #include "WifiRoam.h"
 
 #include "config.h"
@@ -210,6 +211,7 @@ void setup() {
 
   setupTermo();
   setupPiscina();
+  setupEnvSensor();
 
   // Force Logic run immediately
   lastLogicRun = millis() - logicInterval;
@@ -444,6 +446,7 @@ void loop() {
   }
 
   loopSondaLink();
+  loopEnvSensor();
   if (wifiUp) wifiRoamLoop(WIFI_SSID, WIFI_PASSWORD, [](const String &m) { logEvent("WIFI", m); });
   updateLed();
 

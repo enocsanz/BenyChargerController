@@ -18,6 +18,10 @@ static volatile float lastTemp = NAN;
 static volatile uint32_t probeUptime = 0;
 static volatile bool lastViaUdp = false;
 static volatile int8_t probeRssi = 0;
+static char probeFw[22] = "";
+static IPAddress probeIp;
+// A reading older than this is not used (nor shown as current)
+static const unsigned long SONDA_STALE = 300000; // 5 min
 static bool started = false;
 static WiFiUDP udp;
 
@@ -43,6 +47,8 @@ static bool handlePacket(const uint8_t *data, int len, bool viaUdp) {
   probeUptime = p.uptime;
   lastViaUdp = viaUdp;
   probeRssi = p.rssi;
+  memcpy(probeFw, p.fw, sizeof(p.fw));
+  probeFw[sizeof(p.fw)] = 0;
   return true;
 }
 
@@ -72,6 +78,7 @@ void loopSondaLink() {
     uint8_t buf[64];
     int len = udp.read(buf, sizeof(buf));
     if (handlePacket(buf, len, true)) {
+      probeIp = udp.remoteIP();
       udp.beginPacket(udp.remoteIP(), udp.remotePort());
       udp.write(buf, len);
       udp.endPacket();
@@ -102,6 +109,39 @@ void loopSondaLink() {
   }
 }
 
+static const char *rssiWord(int rssi) {
+  return rssi >= -67 ? "buena" : rssi >= -75 ? "aceptable" : rssi >= -80 ? "justa" : "mala";
+}
+
+static bool fresh() { return rxCount > 0 && millis() - lastRxAt < SONDA_STALE; }
+
+float sondaWaterTemp() { return fresh() ? lastTemp : NAN; }
+
+String sondaShortText() {
+  if (!started || rxCount == 0) return "📡 Sonda: ningun mensaje recibido";
+  if (!fresh())
+    return "📡 Sonda: sin senal desde hace " + String((millis() - lastRxAt) / 60000) + " min";
+  String msg = "📡 Sonda: ";
+  msg += lastMinutePct >= 0 ? String(lastMinutePct, 0) + " % ultimo minuto" : "conectada";
+  if (probeRssi != 0) msg += " | WiFi " + String(probeRssi) + " dBm (" + rssiWord(probeRssi) + ")";
+  if (!isnan(lastTemp)) msg += " | Agua " + String(lastTemp, 1) + " C";
+  return msg;
+}
+
+String sondaVersionText() {
+  if (rxCount == 0 || probeFw[0] == 0) return "📡 Sonda: sin datos de version todavia";
+  String msg = "📡 Sonda: firmware " + String(probeFw);
+  if (probeIp) msg += "\n   IP " + probeIp.toString();
+  msg += "\n   Actualizar: cd sonda && pio run -e m5stickcplus_ota -t upload";
+  return msg;
+}
+
+String sondaWifiText() {
+  if (!fresh()) return "📡 Sonda: sin mensajes recientes";
+  if (probeRssi == 0) return "📡 Sonda: por ESP-NOW (sin dato de WiFi)";
+  return "📡 Sonda: " + String(probeRssi) + " dBm (" + rssiWord(probeRssi) + ")";
+}
+
 String sondaLinkText() {
   if (!started) return "📡 Sonda: enlace no iniciado";
   String msg = "📡 Sonda del termo\n";
@@ -117,9 +157,7 @@ String sondaLinkText() {
   msg += "   Desde que arranco la sonda: " + String(pct(rxCount, lastSeq - firstSeq + 1), 0) + " % (" +
          String(rxCount) + " de " + String(lastSeq - firstSeq + 1) + ")\n";
   if (probeRssi != 0) {
-    const char *q = probeRssi >= -67 ? "buena" : probeRssi >= -75 ? "aceptable"
-                    : probeRssi >= -80 ? "justa" : "mala";
-    msg += "   WiFi de la sonda: " + String(probeRssi) + " dBm (" + q + ")\n";
+    msg += "   WiFi de la sonda: " + String(probeRssi) + " dBm (" + rssiWord(probeRssi) + ")\n";
   }
   msg += "   Sonda encendida " + String(probeUptime / 60) + " min";
   if (!isnan(lastTemp)) msg += " | Agua " + String(lastTemp, 1) + " C";

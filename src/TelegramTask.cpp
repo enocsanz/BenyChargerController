@@ -150,6 +150,7 @@ void handleNewMessages(int numNewMessages) {
       }
       msg += "\n" + termoStatusText() + "\n";
       msg += "\n" + piscinaStatusText() + "\n";
+      msg += "\n" + sondaShortText() + "\n";
       msg += "\n" + systemText() + "\n";
 
       bot.sendMessage(chat_id, msg, "");
@@ -262,14 +263,16 @@ void handleNewMessages(int numNewMessages) {
       bot.sendMessage(chat_id, "🧩 Firmware " + String(FW_BUILD) + "\n   IP " +
                                    WiFi.localIP().toString() + " (" + OTA_HOSTNAME +
                                    "), CPU " + String(getCpuFrequencyMhz()) +
-                                   " MHz\n   Actualizar: pio run -e stamps3_ota -t upload", "");
+                                   " MHz\n   Actualizar: pio run -e stamps3_ota -t upload\n\n" +
+                                   sondaVersionText(), "");
     } else if (textLower == "/wifi") {
       bot.sendMessage(chat_id, "📶 WiFi: " + wifiText() + "\n   Red " + WiFi.SSID() + ", canal " +
                                    String(WiFi.channel()) + ", IP " + WiFi.localIP().toString() +
                                    "\n   Punto de acceso " + WiFi.BSSIDstr() +
                                    "\n   Chip " + String(temperatureRead(), 0) + " C a " +
                                    String(getCpuFrequencyMhz()) + " MHz" +
-                                   "\n   Buena > -67, aceptable > -75, justa > -80 dBm", "");
+                                   "\n   Buena > -67, aceptable > -75, justa > -80 dBm\n\n" +
+                                   sondaWifiText(), "");
     } else if (textLower == "/diag") {
       bot.sendMessage(chat_id, diagStatusText(), "");
     } else if (textLower == "/diag_on" || textLower == "/diag on") {

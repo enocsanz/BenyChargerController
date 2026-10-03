@@ -249,7 +249,7 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 |---------|-------------|
 | `/start` | Muestra el mensaje de bienvenida con todos los comandos. |
 | `/help` | Lista todos los comandos disponibles. |
-| `/status` | Estado completo: precio, red, solar, cargador, amperaje objetivo/real, modo activo, termo, depuradora y una línea del controlador (WiFi, tiempo encendido, memoria libre). |
+| `/status` | Estado completo: precio, red, solar, cargador, amperaje objetivo/real, modo activo, termo, depuradora una línea de la sonda del termo (% recibido, su WiFi y la temperatura del agua) y una del controlador (WiFi, tiempo encendido, memoria libre). |
 
 ### Modos de Carga
 | Comando | Descripción |
@@ -266,7 +266,7 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 ### Termo (ACS)
 | Comando | Descripción |
 |---------|-------------|
-| `/termo` | Estado del termo: calentando / en reposo / cortado (y por qué), modo y umbral. |
+| `/termo` | Estado del termo: calentando / en reposo / cortado (y por qué), modo, umbral y temperatura del agua (si la sonda la envía). |
 | `/termo_auto` | Modo AUTO: se corta por precio y por sobrecarga. |
 | `/termo_on` | Ignora el precio; la protección por sobrecarga sigue activa. |
 | `/termo_off` | Relé abierto hasta volver a `/termo_auto` o `/termo_on`. |
@@ -288,8 +288,8 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 |---------|-------------|
 | `/diag` | Estado del registro en Google Sheets: pendiente de enviar y resultado del último envío (con su duración: la conexión TLS es lo primero que notaría una CPU más lenta). |
 | `/sonda` | Enlace con la sonda del termo: % de mensajes recibidos (último minuto y total), vía (WiFi o ESP-NOW) y último mensaje. |
-| `/version` | Versión del firmware (fecha y hora de compilación), IP y cómo actualizarlo. |
-| `/wifi` | Intensidad de la señal WiFi del controlador (dBm y valoración: buena > −67, aceptable > −75, justa > −80), red, canal e IP. |
+| `/version` | Versión del firmware (fecha y hora de compilación), IP y cómo actualizarlo; lo mismo de la sonda del termo. |
+| `/wifi` | Intensidad de la señal WiFi del controlador (dBm y valoración: buena > −67, aceptable > −75, justa > −80), red, canal e IP. También la señal de la sonda del termo. |
 | `/diag_on` / `/diag_off` | Activa o para el registro por minuto y de eventos. |
 
 ### Comandos retirados

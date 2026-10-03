@@ -15,6 +15,7 @@ struct __attribute__((packed)) SondaPacket {
   uint32_t uptime; // probe uptime (s)
   float temp;      // water temperature (C); NAN while there is no sensor
   int8_t rssi;     // probe's WiFi signal (dBm); 0 over ESP-NOW
+  char fw[21];     // probe firmware build, __DATE__ " " __TIME__
 };
 
 #endif

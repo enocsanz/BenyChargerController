@@ -4,6 +4,7 @@
 #include "GoogleSheetsTask.h"
 #include "HuaweiTask.h"
 #include "TelegramTask.h"
+#include "SondaLink.h"
 #include "TuyaLocal.h"
 #include "config.h"
 #include <Preferences.h>
@@ -285,5 +286,8 @@ String termoStatusText() {
     break;
   }
   msg += "\n   Modo " + modeStr + " | Umbral " + String(termo_max_price, 3) + " E/kWh";
+  float agua = sondaWaterTemp();
+  msg += isnan(agua) ? String("\n   Agua: sin sonda conectada")
+                     : "\n   Agua: " + String(agua, 1) + " C (sonda)";
   return msg;
 }

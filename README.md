@@ -193,15 +193,15 @@ Valores por defecto en `PISCINA_MAX_HOURS` / `PISCINA_MIN_HOURS`. `/set_piscina_
 
 > Quita cualquier **programación horaria** del relé en la app Smart Life: en `AUTO` el StampS3 manda sobre él y la devolvería a su estado.
 
-## Sonda del Termo (ESP-NOW) — en pruebas
+## Sonda del Termo — en pruebas
 
-Junto al termo, en otra planta, la WiFi llega a −83/−86 dBm: demasiado poco para el controlador. La temperatura del agua (sonda DS18B20, pendiente) la medirá un **M5StickC Plus** junto al termo, que se la manda al StampS3 por **ESP-NOW**: mensajes directos de unos bytes entre los dos chips, sin unirse a la WiFi ni usar TLS, que toleran mucho mejor una señal floja y en los que perder alguno no importa.
+Junto al termo, en otra planta, la temperatura del agua (sonda DS18B20, pendiente) la medirá un **M5StickC Plus** que se la manda al StampS3. Ahora mismo es una **prueba de enlace**: la sonda envía un mensaje numerado por segundo (`include/SondaPacket.h`, compartido por los dos firmwares) y el StampS3 cuenta cuántos llegan. `/sonda` en Telegram da el % recibido, por qué vía y la hora del último mensaje, y cada hora queda un resumen en Eventos (`SONDA`).
 
-Ahora mismo es una **prueba de enlace**: la sonda envía un mensaje numerado por segundo (`include/SondaPacket.h`, compartido por los dos firmwares) y su pantalla muestra el canal y el % que el StampS3 confirma (último minuto, en verde ≥ 80 %, amarillo ≥ 50 %, rojo por debajo; y total). En el StampS3, `/espnow` da el % recibido y la hora del último mensaje, y cada hora queda un resumen en Eventos (`SONDA`).
+**Vía: WiFi de casa (UDP, puerto 4210).** La primera prueba fue por **ESP-NOW** (directo entre los dos chips, sin router): 100 % mientras el StampS3 estuvo en la casa. Pero el StampS3 se trasladó a la caseta de la depuradora, junto a otro punto Google Wifi, y ESP-NOW no llega tan lejos: no pasa por los puntos de la red mesh. Así que la sonda se une a la WiFi y envía por UDP al StampS3 (192.168.86.41), que **devuelve cada mensaje** como confirmación. El StampS3 sigue escuchando también ESP-NOW por si vuelve a estar al alcance.
 
-- **Firmware de la sonda**: carpeta `sonda/` (proyecto PlatformIO propio): `cd sonda && pio run -t upload`. Lleva la MAC del StampS3 (`MAIN_MAC`; `/espnow` la muestra).
-- **Canal**: ESP-NOW tiene que ir por el canal del router, en el que está el StampS3. La sonda no se une a la WiFi: prueba los canales hasta que el StampS3 confirma y vuelve a buscar tras 10 mensajes sin confirmar (el router puede cambiar de canal).
-- **Credenciales antiguas**: la sonda borra al arrancar las credenciales WiFi guardadas por un firmware anterior. Con ellas, la reconexión automática hacía saltar de canal y solo llegaba el 25 % de los mensajes, con los dos aparatos uno al lado del otro.
+- **Pantalla de la sonda**: su señal WiFi (verde ≥ −67, amarillo ≥ −75, rojo por debajo), el % confirmado en el último minuto (verde ≥ 80 %, amarillo ≥ 50 %, rojo por debajo), el total, y su IP y punto de acceso.
+- **Red mesh**: tanto el StampS3 como la sonda escanean todos los canales y se unen al punto con **más señal**. Por defecto el ESP32 se une al primero que encuentra: en la caseta, con un punto allí mismo, el StampS3 daba −79/−82 dBm; con este cambio, −48.
+- **Firmware de la sonda**: carpeta `sonda/` (proyecto PlatformIO propio). La primera vez por USB (`cd sonda && pio run -t upload`); después por WiFi (`pio run -e m5stickcplus_ota -t upload`, nombre `beny-sonda.local`; conviene fijarle la IP en el router). Usa la WiFi y la contraseña OTA de `include/config.h` y `secrets.ini`.
 
 ## Reconexión WiFi
 
@@ -287,7 +287,7 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 | Comando | Descripción |
 |---------|-------------|
 | `/diag` | Estado del registro en Google Sheets: pendiente de enviar y resultado del último envío (con su duración: la conexión TLS es lo primero que notaría una CPU más lenta). |
-| `/espnow` | Enlace con la sonda del termo: % de mensajes recibidos (último minuto y total) y último mensaje. |
+| `/sonda` | Enlace con la sonda del termo: % de mensajes recibidos (último minuto y total), vía (WiFi o ESP-NOW) y último mensaje. `/espnow` también vale. |
 | `/version` | Versión del firmware (fecha y hora de compilación), IP y cómo actualizarlo. |
 | `/wifi` | Intensidad de la señal WiFi del controlador (dBm y valoración: buena > −67, aceptable > −75, justa > −80), red, canal e IP. |
 | `/diag_on` / `/diag_off` | Activa o para el registro por minuto y de eventos. |

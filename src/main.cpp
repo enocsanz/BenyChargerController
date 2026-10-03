@@ -148,6 +148,12 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false); // Modem sleep adds latency to the Beny UDP / Modbus polls
   WiFi.setAutoReconnect(true);
+  // Mesh network (several Google Wifi points, same SSID): by default the
+  // ESP32 joins the FIRST point its scan finds, not the closest one. In the
+  // pool house, with a point right there, it got -79/-82 dBm from a far one.
+  // Scan every channel and join the strongest. Kept for every later begin().
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 20000) {

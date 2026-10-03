@@ -38,6 +38,9 @@ String notifyQueue[NOTIFY_QUEUE_SIZE];
 int notifyCount = 0;
 
 void setupTelegram() {
+  // The library's default is 1500 characters, and longer messages go out as
+  // "null": /help passed it once the OTA steps were added.
+  bot.maxMessageLength = 5000;
   clientTCP.setInsecure();
   clientTCP.setHandshakeTimeout(20000);
 }
@@ -263,6 +266,7 @@ void handleNewMessages(int numNewMessages) {
     } else if (textLower == "/wifi") {
       bot.sendMessage(chat_id, "📶 WiFi: " + wifiText() + "\n   Red " + WiFi.SSID() + ", canal " +
                                    String(WiFi.channel()) + ", IP " + WiFi.localIP().toString() +
+                                   "\n   Punto de acceso " + WiFi.BSSIDstr() +
                                    "\n   Chip " + String(temperatureRead(), 0) + " C a " +
                                    String(getCpuFrequencyMhz()) + " MHz" +
                                    "\n   Buena > -67, aceptable > -75, justa > -80 dBm", "");

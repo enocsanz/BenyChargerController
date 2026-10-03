@@ -19,6 +19,7 @@ extern int max_grid_power;      // Added for dynamic limit
 extern int target_amps;         // Current DLB setpoint (A)
 extern void saveMode(int mode); // Added for persistence
 extern void saveMaxGridPower(int watts);
+extern const char *FW_BUILD;  // build date and time, from main.cpp
 
 WiFiClientSecure clientTCP;
 UniversalTelegramBot bot(BOT_TOKEN, clientTCP);
@@ -100,6 +101,16 @@ void handleNewMessages(int numNewMessages) {
       msg += "DIAGNOSTICO:\n";
       msg += "/diag - Estado del registro en Google Sheets\n";
       msg += "/wifi - Intensidad de la senal WiFi del controlador\n";
+      msg += "/version - Version del firmware e IP\n\n";
+      msg += "ACTUALIZAR FIRMWARE (OTA, por WiFi):\n";
+      msg += "1. En el PC, en la misma WiFi y en la carpeta del proyecto:\n";
+      msg += "   pio run -e stamps3_ota -t upload\n";
+      msg += "   (va a " + WiFi.localIP().toString() + "; la clave esta en secrets.ini)\n";
+      msg += "2. Tarda ~1 min: el LED parpadea en morado y el control se pausa "
+             "(los reles tienen su seguro)\n";
+      msg += "3. Se reinicia solo y avisa con la version nueva; compruebala con /version\n";
+      msg += "Si falla a medias, sigue con el firmware anterior. Ultimo recurso: por USB, "
+             "pio run -e stamps3 -t upload\n";
       msg += "/diag_on /diag_off - Activa o para el registro por minuto\n";
       bot.sendMessage(chat_id, msg, "");
     } else if (textLower == "/status") {
@@ -240,6 +251,11 @@ void handleNewMessages(int numNewMessages) {
         bot.sendMessage(chat_id, "Uso: /set_piscina_horas MAX MIN (horas, MIN <= MAX <= 24). "
                                  "Ej: /set_piscina_horas 6 3", "");
       }
+    } else if (textLower == "/version") {
+      bot.sendMessage(chat_id, "🧩 Firmware " + String(FW_BUILD) + "\n   IP " +
+                                   WiFi.localIP().toString() + " (" + OTA_HOSTNAME +
+                                   "), CPU " + String(getCpuFrequencyMhz()) +
+                                   " MHz\n   Actualizar: pio run -e stamps3_ota -t upload", "");
     } else if (textLower == "/wifi") {
       bot.sendMessage(chat_id, "📶 WiFi: " + wifiText() + "\n   Red " + WiFi.SSID() + ", canal " +
                                    String(WiFi.channel()) + ", IP " + WiFi.localIP().toString() +

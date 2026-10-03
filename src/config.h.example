@@ -58,4 +58,8 @@
 // Google Sheets Script URL
 #define GOOGLE_SCRIPT_URL "https://script.google.com/macros/s/CUERPO_DE_TU_SCRIPT/exec"
 
+// OTA (firmware update over WiFi). Same password as in secrets.ini.
+#define OTA_HOSTNAME "beny-dlb"
+#define OTA_PASSWORD "CHANGE_ME"
+
 #endif

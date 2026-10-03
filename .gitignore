@@ -16,3 +16,6 @@ lib/
 devices.json
 tinytuya.json
 tuya-raw.json
+
+# PlatformIO local secrets (OTA password)
+secrets.ini

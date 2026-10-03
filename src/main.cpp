@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include <Arduino.h>
+#include <ArduinoOTA.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <esp_task_wdt.h>
@@ -38,6 +39,10 @@ const unsigned long logicInterval = 1000; // Check every 1 second (Faster DLB)
 const int BUTTON_PIN = 0;      // G0 (also BOOT: held at power-up = download mode)
 const int LED_PIN = 21;        // WS2812 on G21
 const uint8_t LED_LEVEL = 24;  // of 255: the LED is very bright at full
+
+// Firmware identity, shown on boot and by /version: after an OTA update it
+// confirms the new build is the one running
+const char *FW_BUILD = __DATE__ " " __TIME__;
 
 #include <Preferences.h>
 
@@ -92,6 +97,35 @@ void updateLed() {
   neopixelWrite(LED_PIN, r, g, b);
 }
 
+// --- OTA (firmware update over WiFi) ---
+// pio run -e stamps3_ota -t upload. ArduinoOTA receives the whole image inside
+// handle(), so the control loop pauses for the ~1 min it takes (the relays
+// keep their failsafe countdown). The new image goes to the other OTA slot:
+// if the transfer fails, the current firmware keeps running.
+bool otaReady = false;
+
+void setupOta() {
+  ArduinoOTA.setHostname(OTA_HOSTNAME);
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.onStart([]() { Serial.println("OTA: Recibiendo firmware..."); });
+  ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
+    esp_task_wdt_reset(); // the transfer runs inside handle(), past the 30s
+    bool on = (millis() / 250) % 2;
+    neopixelWrite(LED_PIN, on ? LED_LEVEL : 0, 0, on ? LED_LEVEL : 0); // purple blink
+    static int lastTen = -1;
+    int pct = total ? done * 100 / total : 0;
+    if (pct / 10 != lastTen) {
+      lastTen = pct / 10;
+      Serial.printf("OTA: %d%%\n", pct);
+    }
+  });
+  ArduinoOTA.onEnd([]() { Serial.println("OTA: Completada, reiniciando"); });
+  ArduinoOTA.onError([](ota_error_t e) { logEventf("OTA", "Error %u: sigue el firmware anterior", e); });
+  ArduinoOTA.begin();
+  otaReady = true;
+  Serial.printf("OTA: Lista en %s (%s)\n", WiFi.localIP().toString().c_str(), OTA_HOSTNAME);
+}
+
 void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   neopixelWrite(LED_PIN, 0, 0, LED_LEVEL); // blue while booting
@@ -122,6 +156,7 @@ void setup() {
 
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("WiFi OK: %s\n", WiFi.localIP().toString().c_str());
+    setupOta();
   } else {
     // Do NOT reboot here. Rebooting on a failed boot-time connect turned a
     // router outage into an endless boot loop. Boot anyway and let loop()
@@ -176,9 +211,10 @@ void setup() {
                                      "deepsleep",   "brownout",  "sdio"};
   int rr = (int)esp_reset_reason();
   String reason = (rr >= 0 && rr <= 10) ? resetNames[rr] : "?";
-  sendTelegramNotification("🚀 Sistema Iniciado (" + reason + "). Modo actual: " + modeStr);
+  sendTelegramNotification("🚀 Sistema Iniciado (" + reason + "). Modo actual: " + modeStr +
+                           "\nFirmware " + String(FW_BUILD));
   logEvent("ARRANQUE", "Reinicio: " + reason + ", modo " + modeStr + ", CPU " +
-                           String(getCpuFrequencyMhz()) + " MHz");
+                           String(getCpuFrequencyMhz()) + " MHz, firmware " + String(FW_BUILD));
 }
 
 void runSmartChargingLogic() {
@@ -357,6 +393,10 @@ void loop() {
   // (Telegram, the Sheets batch, ESIOS, reconnecting a relay) added up past
   // it once (task_wdt reset on 01/10 at 22:08).
   if (wifiUp) {
+    if (!otaReady) setupOta(); // WiFi was down at boot
+    ArduinoOTA.handle();
+    esp_task_wdt_reset();
+
     loopTelegram();
     esp_task_wdt_reset();
     loopGoogleSheets();

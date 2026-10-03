@@ -15,6 +15,7 @@ Versiones M5Dial y StampS3 (ESP32-S3):
 - **Seguro en los relés si el StampS3 cae**: la cuenta atrás propia de cada relé Tuya hace de *dead man's switch*: el termo vuelve a encenderse y la depuradora se apaga solos si el StampS3 deja de renovarla. Ver [Seguro si el StampS3 deja de funcionar](#seguro-si-el-stamps3-deja-de-funcionar).
 - **Vigilante con aviso por Telegram**: el script de Google avisa si el StampS3 lleva más de 20 min sin enviar datos (apagones, WiFi, cuelgues). Ver [Vigilante](#vigilante-aviso-si-el-stamps3-deja-de-dar-señales).
 - **DLB con pasos suaves de 1A**, que actúa solo con lecturas nuevas de red y espera a que el coche siga cada paso. Ver [Control Dinámico](#control-dinámico-dlb-pasos-suaves-de-1a).
+- **Actualización por WiFi (OTA)**: el StampS3 va junto al termo y ya no hace falta el cable. Ver [Actualizar el firmware](#actualizar-el-firmware-ota).
 - **Varios servidores NTP**: el StampS3 no tiene reloj con pila (el Dial sí, y tapaba que NTP a veces tardaba minutos).
 - **Hora sin condición de carrera**: `getLocalTime(&t, 0)` devolvía "sin hora" al azar y el precio salía como desconocido un segundo cada pocos minutos, lo que encendía y apagaba el termo (190 veces en un día). Se usa `timeNow()` (`time()` + `localtime_r`).
 - **Watchdog alimentado entre tareas de red**: varias conexiones lentas en la misma vuelta del bucle llegaron a sumar más de 30 s.
@@ -276,6 +277,7 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 | Comando | Descripción |
 |---------|-------------|
 | `/diag` | Estado del registro en Google Sheets: pendiente de enviar y resultado del último envío (con su duración: la conexión TLS es lo primero que notaría una CPU más lenta). |
+| `/version` | Versión del firmware (fecha y hora de compilación), IP y cómo actualizarlo. |
 | `/wifi` | Intensidad de la señal WiFi del controlador (dBm y valoración: buena > −67, aceptable > −75, justa > −80), red, canal e IP. |
 | `/diag_on` / `/diag_off` | Activa o para el registro por minuto y de eventos. |
 
@@ -284,7 +286,7 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 
 ### Notificaciones Automáticas
 El sistema envía mensajes proactivos a Telegram cuando:
-- Se inicia el sistema, con la causa del reinicio (`encendido` = falta de alimentación, `task_wdt` = cuelgue, `brownout` = bajada de tensión…) y el modo activo.
+- Se inicia el sistema, con la versión del firmware, la causa del reinicio (`encendido` = falta de alimentación, `task_wdt` = cuelgue, `brownout` = bajada de tensión…) y el modo activo.
 - Se cambia de modo con el botón del StampS3.
 - El termo se corta por sobrecarga, y cuando se reactiva.
 - Hay sobrecarga sostenida que el sistema ya no puede resolver (coche al mínimo, termo sin consumo), y cuando se resuelve.
@@ -306,6 +308,7 @@ CargadorBenyV2/
 │   ├── TermoTask.h         # Interfaz del termo (modos, estado)
 │   ├── TuyaLocal.h         # Cliente Tuya local 3.4 / 3.5
 │   └── config.h            # Credenciales (no se sube: .gitignore)
+├── secrets.ini             # Contraseña OTA para PlatformIO (no se sube: .gitignore)
 ├── src/
 │   ├── main.cpp            # Setup, loop, lógica DLB, botón y LED de estado
 │   ├── BenyTask.cpp        # Comunicación UDP con el cargador Beny
@@ -410,6 +413,7 @@ En la hoja de cálculo, *Extensiones → Apps Script* (o desde [script.google.co
    - `TERMO_IP` / `TERMO_LOCAL_KEY` — Relé del termo (ver [Control local](#control-local-tuya-35)).
    - `TERMO_MAX_PRICE`, `TERMO_DEFAULT_POWER`, `CONTRACTED_POWER` — Umbral de precio, potencia del termo hasta medirla y potencia contratada.
    - `PISCINA_IP` / `PISCINA_LOCAL_KEY` / `PISCINA_POWER` / `PISCINA_MAX_HOURS` / `PISCINA_MIN_HOURS` — Relé de la depuradora, su potencia y las horas por mes.
+   - `OTA_HOSTNAME` / `OTA_PASSWORD` — Actualización por WiFi. La misma contraseña va en `secrets.ini` (ver [Actualizar el firmware](#actualizar-el-firmware-ota)).
 
 2. **Compilar y cargar** con PlatformIO (por USB — no hay actualización OTA):
    ```bash
@@ -418,6 +422,8 @@ En la hoja de cálculo, *Extensiones → Apps Script* (o desde [script.google.co
    El StampS3 se programa por el USB nativo del ESP32-S3 (aparece como *Dispositivo serie USB*). Si no aparece ningún puerto — típicamente la primera vez, con el firmware de fábrica —, mantén pulsado su botón (**G0**) mientras conectas el cable para entrar en modo descarga.
 
    > Abrir el puerto serie (monitor) puede **reiniciar** el StampS3 por las líneas DTR/RTS del USB; en el log aparece como reinicio `desconocido`. Sin el PC conectado no pasa.
+
+   Las siguientes veces se puede actualizar **por WiFi**: ver [Actualizar el firmware](#actualizar-el-firmware-ota).
 
 3. **Monitorizar** la salida serie:
    ```bash
@@ -443,9 +449,31 @@ En un equipo recién programado la NVS está vacía y el arranque muestra `nvs_o
 
 Las claves `t_pause`, `t_resume` y `r_margin` de la pausa automática ya no se leen ni se escriben. Quedan huérfanas en la NVS de los equipos actualizados, sin efecto.
 
-## Particiones de Flash (sin OTA)
+## Actualizar el Firmware (OTA)
 
-El proyecto **no incluye actualización OTA**: se carga siempre por USB. La placa `m5stack-stamps3` usa `default_8MB.csv` (dos ranuras de aplicación de 3,3 MB), así que no hace falta un esquema propio: el firmware ocupa en torno al **29 %** de una ranura, con margen holgado para crecer.
+El StampS3 se actualiza **por WiFi**, sin cable, desde el PC y en la misma red:
+
+```bash
+pio run -e stamps3_ota -t upload
+```
+
+1. Compila y envía el firmware a `192.168.86.41` (IP fija en el router, `upload_port` en `platformio.ini`). Tarda ~1 min.
+2. Durante la transferencia el **LED parpadea en morado** y el control se pausa: el Beny se queda en el último amperaje y los relés conservan su [seguro](#seguro-si-el-stamps3-deja-de-funcionar).
+3. Se reinicia solo y avisa por Telegram con la **fecha de compilación** del firmware nuevo (`/version` también la muestra).
+
+Detalles:
+
+- **Contraseña**: `OTA_PASSWORD` en `include/config.h` y la misma en `secrets.ini` (`upload_flags = --auth=...` del entorno `stamps3_ota`, que `platformio.ini` carga con `extra_configs`). Ninguno de los dos se sube a git: sin la contraseña nadie de la red puede cargarle otro firmware.
+- **La primera vez** que se instala un firmware con OTA tiene que ser por USB (`pio run -e stamps3 -t upload`), porque el anterior no sabe recibir por WiFi.
+- **Si la transferencia falla a medias**, el StampS3 sigue con el firmware anterior: el nuevo se escribe en la otra ranura de la flash y solo se activa al terminar bien.
+- **Windows** puede pedir permiso en el firewall la primera vez: el PC abre un puerto al que el StampS3 se conecta para descargar el firmware.
+- **Último recurso**, si un firmware nuevo no arrancase: por USB, como la primera vez. Si no aparece el puerto, mantener pulsado el botón (G0) al conectar.
+
+`/help` en Telegram incluye estos pasos.
+
+## Particiones de Flash
+
+La placa `m5stack-stamps3` usa `default_8MB.csv`: **dos ranuras de aplicación de 3,3 MB** (`app0`/`app1`), que es lo que necesita la OTA para escribir el firmware nuevo sin tocar el que está funcionando. El firmware ocupa en torno al **30 %** de una ranura, con margen holgado para crecer.
 
 `platformio.ini` activa además `-DARDUINO_USB_CDC_ON_BOOT=1`; sin esa opción, `Serial` no sale por el USB nativo del ESP32-S3 y el monitor serie queda mudo.
 

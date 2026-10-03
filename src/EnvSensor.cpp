@@ -162,7 +162,7 @@ void setupEnvSensor() {
     }
     if (!ok) {
       Wire.end();
-      logEvent("AMBIENTE", "Sensor ENV III no encontrado en los pines libres");
+      logEvent("CASETA", "Sensor ENV III no encontrado en los pines libres");
       sendTelegramNotification("🌡️ Sensor ENV III: no encontrado. Revisa las conexiones "
                                "(5V, GND, SDA, SCL) o dime a que pines lo has conectado.");
       return;
@@ -182,7 +182,7 @@ void setupEnvSensor() {
   String msg = "Sensor ENV III en SDA G" + String(sdaPin) + ", SCL G" + String(sclPin) +
                " | SHT30 OK" + (qmp ? ", QMP6988 OK" : ", QMP6988 no responde") +
                (isnan(temp) ? String("") : " | " + String(temp, 1) + " C, " + String(hum, 0) + " %");
-  logEvent("AMBIENTE", msg);
+  logEvent("CASETA", msg);
   sendTelegramNotification("🌡️ " + msg);
 }
 
@@ -199,10 +199,10 @@ float envTemp() { return temp; }
 float envHumidity() { return hum; }
 
 String envText() {
-  if (!ok) return "🌡️ Ambiente: sin sensor";
+  if (!ok) return "🌡️ Caseta: sin sensor";
   if (isnan(temp)) {
-    return "🌡️ Ambiente: sensor sin lectura (SDA G" + String(sdaPin) + ", SCL G" + String(sclPin) +
+    return "🌡️ Caseta: sensor sin lectura (SDA G" + String(sdaPin) + ", SCL G" + String(sclPin) +
            (lastError.length() ? ": " + lastError : String("")) + ")";
   }
-  return "🌡️ Ambiente: " + String(temp, 1) + " C, " + String(hum, 0) + " % humedad";
+  return "🌡️ Caseta: " + String(temp, 1) + " C, " + String(hum, 0) + " % humedad";
 }

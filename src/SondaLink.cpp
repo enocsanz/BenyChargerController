@@ -118,10 +118,10 @@ static bool fresh() { return rxCount > 0 && millis() - lastRxAt < SONDA_STALE; }
 float sondaWaterTemp() { return fresh() ? lastTemp : NAN; }
 
 String sondaShortText() {
-  if (!started || rxCount == 0) return "📡 Sonda: ningun mensaje recibido";
+  if (!started || rxCount == 0) return "📡 Sonda Termo: ningun mensaje recibido";
   if (!fresh())
-    return "📡 Sonda: sin senal desde hace " + String((millis() - lastRxAt) / 60000) + " min";
-  String msg = "📡 Sonda: ";
+    return "📡 Sonda Termo: sin senal desde hace " + String((millis() - lastRxAt) / 60000) + " min";
+  String msg = "📡 Sonda Termo: ";
   msg += lastMinutePct >= 0 ? String(lastMinutePct, 0) + " % ultimo minuto" : "conectada";
   if (probeRssi != 0) msg += " | WiFi " + String(probeRssi) + " dBm (" + rssiWord(probeRssi) + ")";
   if (!isnan(lastTemp)) msg += " | Agua " + String(lastTemp, 1) + " C";
@@ -129,22 +129,22 @@ String sondaShortText() {
 }
 
 String sondaVersionText() {
-  if (rxCount == 0 || probeFw[0] == 0) return "📡 Sonda: sin datos de version todavia";
-  String msg = "📡 Sonda: firmware " + String(probeFw);
+  if (rxCount == 0 || probeFw[0] == 0) return "📡 Sonda Termo: sin datos de version todavia";
+  String msg = "📡 Sonda Termo: firmware " + String(probeFw);
   if (probeIp) msg += "\n   IP " + probeIp.toString();
   msg += "\n   Actualizar: cd sonda && pio run -e m5stickcplus_ota -t upload";
   return msg;
 }
 
 String sondaWifiText() {
-  if (!fresh()) return "📡 Sonda: sin mensajes recientes";
-  if (probeRssi == 0) return "📡 Sonda: por ESP-NOW (sin dato de WiFi)";
-  return "📡 Sonda: " + String(probeRssi) + " dBm (" + rssiWord(probeRssi) + ")";
+  if (!fresh()) return "📡 Sonda Termo: sin mensajes recientes";
+  if (probeRssi == 0) return "📡 Sonda Termo: por ESP-NOW (sin dato de WiFi)";
+  return "📡 Sonda Termo: " + String(probeRssi) + " dBm (" + rssiWord(probeRssi) + ")";
 }
 
 String sondaLinkText() {
-  if (!started) return "📡 Sonda: enlace no iniciado";
-  String msg = "📡 Sonda del termo\n";
+  if (!started) return "📡 Sonda Termo: enlace no iniciado";
+  String msg = "📡 Sonda Termo\n";
   if (rxCount == 0) {
     return msg + "   Ningun mensaje recibido todavia\n   Este controlador: IP " +
            WiFi.localIP().toString() + ", UDP " + String(SONDA_UDP_PORT) + ", MAC " +

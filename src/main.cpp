@@ -5,6 +5,7 @@
 #include "TelegramTask.h"
 #include "TermoTask.h"
 #include "PiscinaTask.h"
+#include "SondaLink.h"
 
 #include "config.h"
 #include <Arduino.h>
@@ -157,6 +158,7 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("WiFi OK: %s\n", WiFi.localIP().toString().c_str());
     setupOta();
+    setupSondaLink();
   } else {
     // Do NOT reboot here. Rebooting on a failed boot-time connect turned a
     // router outage into an endless boot loop. Boot anyway and let loop()
@@ -393,7 +395,10 @@ void loop() {
   // (Telegram, the Sheets batch, ESIOS, reconnecting a relay) added up past
   // it once (task_wdt reset on 01/10 at 22:08).
   if (wifiUp) {
-    if (!otaReady) setupOta(); // WiFi was down at boot
+    if (!otaReady) { // WiFi was down at boot
+      setupOta();
+      setupSondaLink();
+    }
     ArduinoOTA.handle();
     esp_task_wdt_reset();
 
@@ -429,6 +434,7 @@ void loop() {
     runPiscinaLogic();
   }
 
+  loopSondaLink();
   updateLed();
 
   // --- TELEMETRY LOGGING (1s) ---

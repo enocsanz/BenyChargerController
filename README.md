@@ -193,6 +193,16 @@ Valores por defecto en `PISCINA_MAX_HOURS` / `PISCINA_MIN_HOURS`. `/set_piscina_
 
 > Quita cualquier **programación horaria** del relé en la app Smart Life: en `AUTO` el StampS3 manda sobre él y la devolvería a su estado.
 
+## Sonda del Termo (ESP-NOW) — en pruebas
+
+Junto al termo, en otra planta, la WiFi llega a −83/−86 dBm: demasiado poco para el controlador. La temperatura del agua (sonda DS18B20, pendiente) la medirá un **M5StickC Plus** junto al termo, que se la manda al StampS3 por **ESP-NOW**: mensajes directos de unos bytes entre los dos chips, sin unirse a la WiFi ni usar TLS, que toleran mucho mejor una señal floja y en los que perder alguno no importa.
+
+Ahora mismo es una **prueba de enlace**: la sonda envía un mensaje numerado por segundo (`include/SondaPacket.h`, compartido por los dos firmwares) y su pantalla muestra el canal y el % que el StampS3 confirma (último minuto, en verde ≥ 80 %, amarillo ≥ 50 %, rojo por debajo; y total). En el StampS3, `/espnow` da el % recibido y la hora del último mensaje, y cada hora queda un resumen en Eventos (`SONDA`).
+
+- **Firmware de la sonda**: carpeta `sonda/` (proyecto PlatformIO propio): `cd sonda && pio run -t upload`. Lleva la MAC del StampS3 (`MAIN_MAC`; `/espnow` la muestra).
+- **Canal**: ESP-NOW tiene que ir por el canal del router, en el que está el StampS3. La sonda no se une a la WiFi: prueba los canales hasta que el StampS3 confirma y vuelve a buscar tras 10 mensajes sin confirmar (el router puede cambiar de canal).
+- **Credenciales antiguas**: la sonda borra al arrancar las credenciales WiFi guardadas por un firmware anterior. Con ellas, la reconexión automática hacía saltar de canal y solo llegaba el 25 % de los mensajes, con los dos aparatos uno al lado del otro.
+
 ## Reconexión WiFi
 
 `WiFi.setAutoReconnect(true)` por sí solo no siempre recupera al ESP32 cuando el punto de acceso desaparece un rato, así que la reconexión es **escalonada y no bloqueante**:
@@ -277,6 +287,7 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 | Comando | Descripción |
 |---------|-------------|
 | `/diag` | Estado del registro en Google Sheets: pendiente de enviar y resultado del último envío (con su duración: la conexión TLS es lo primero que notaría una CPU más lenta). |
+| `/espnow` | Enlace con la sonda del termo: % de mensajes recibidos (último minuto y total) y último mensaje. |
 | `/version` | Versión del firmware (fecha y hora de compilación), IP y cómo actualizarlo. |
 | `/wifi` | Intensidad de la señal WiFi del controlador (dBm y valoración: buena > −67, aceptable > −75, justa > −80), red, canal e IP. |
 | `/diag_on` / `/diag_off` | Activa o para el registro por minuto y de eventos. |

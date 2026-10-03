@@ -2,6 +2,7 @@
 #include "BenyTask.h"
 #include "GoogleSheetsTask.h"
 #include "PiscinaTask.h"
+#include "SondaLink.h"
 #include "TermoTask.h"
 
 // #include "WeatherTask.h" REMOVED
@@ -101,7 +102,8 @@ void handleNewMessages(int numNewMessages) {
       msg += "DIAGNOSTICO:\n";
       msg += "/diag - Estado del registro en Google Sheets\n";
       msg += "/wifi - Intensidad de la senal WiFi del controlador\n";
-      msg += "/version - Version del firmware e IP\n\n";
+      msg += "/version - Version del firmware e IP\n";
+      msg += "/espnow - Enlace con la sonda del termo (% de mensajes recibidos)\n\n";
       msg += "ACTUALIZAR FIRMWARE (OTA, por WiFi):\n";
       msg += "1. En el PC, en la misma WiFi y en la carpeta del proyecto:\n";
       msg += "   pio run -e stamps3_ota -t upload\n";
@@ -251,6 +253,8 @@ void handleNewMessages(int numNewMessages) {
         bot.sendMessage(chat_id, "Uso: /set_piscina_horas MAX MIN (horas, MIN <= MAX <= 24). "
                                  "Ej: /set_piscina_horas 6 3", "");
       }
+    } else if (textLower == "/espnow") {
+      bot.sendMessage(chat_id, sondaLinkText(), "");
     } else if (textLower == "/version") {
       bot.sendMessage(chat_id, "🧩 Firmware " + String(FW_BUILD) + "\n   IP " +
                                    WiFi.localIP().toString() + " (" + OTA_HOSTNAME +

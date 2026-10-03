@@ -6,7 +6,19 @@ El objetivo principal es maximizar el autoconsumo solar, proteger la instalació
 
 > La versión anterior para **M5StickC Plus** está congelada en la etiqueta git [`v1-m5stickcplus`](../../tree/v1-m5stickcplus).
 
-## Mejoras de Estabilidad (Última versión)
+## Mejoras de Estabilidad
+
+Versión M5Dial:
+
+- **Seguro en los relés si el M5Dial cae**: la cuenta atrás propia de cada relé Tuya hace de *dead man's switch*: el termo vuelve a encenderse y la depuradora se apaga solos si el M5Dial deja de renovarla. Ver [Seguro si el M5Dial deja de funcionar](#seguro-si-el-m5dial-deja-de-funcionar).
+- **Vigilante con aviso por Telegram**: el script de Google avisa si el M5Dial lleva más de 20 min sin enviar datos (apagones, WiFi, cuelgues). Ver [Vigilante](#vigilante-aviso-si-el-m5dial-deja-de-dar-señales).
+- **DLB con pasos suaves de 1A**, que actúa solo con lecturas nuevas de red y espera a que el coche siga cada paso. Ver [Control Dinámico](#control-dinámico-dlb-pasos-suaves-de-1a).
+- **Hora sin condición de carrera**: `getLocalTime(&t, 0)` devolvía "sin hora" al azar y el precio salía como desconocido un segundo cada pocos minutos, lo que encendía y apagaba el termo (190 veces en un día). Se usa `timeNow()` (`time()` + `localtime_r`).
+- **Watchdog alimentado entre tareas de red**: varias conexiones lentas en la misma vuelta del bucle llegaron a sumar más de 30 s.
+- **Precios ESIOS por día**: se recargan al cambiar de día (antes, tras medianoche, se servían los del día anterior) y un fallo se reintenta una vez por minuto.
+- **Diagnóstico en Google Sheets**, por minuto y con eventos, que permite revisar todo el funcionamiento. Ver [Diagnóstico](#diagnóstico-en-google-sheets).
+
+Versión M5StickC Plus:
 
 - **Pausa automática eliminada**: el cargador ignoraba la orden de STOP (modo *Plug and Charge*) y rearrancaba a plena potencia, justo lo contrario de lo buscado. El control es ahora exclusivamente por amperaje, con suelo en 6A. Ver [El mínimo de 6A es el suelo del sistema](#el-mínimo-de-6a-es-el-suelo-del-sistema).
 - **Notificaciones de Telegram sin bloqueo**: se encolan y se entregan desde la tarea de Telegram, en lugar de disparar una petición HTTPS bloqueante desde `setup()` o desde la lógica de control (riesgo de reinicio por watchdog).
@@ -65,6 +77,7 @@ Consecuencias que hay que tener presentes:
 - **Configura `/set_limit` contando con ese consumo residual.** El límite debe dejar margen para los 6A del cargador por debajo de tu potencia contratada; el DLB no puede bajar de ahí.
 - Cuando el sistema está en el suelo de 6A lo señala explícitamente: la fila de amperios de la pantalla pasa a amarillo y `/status` incluye un aviso.
 - Si quieres un corte real de la carga, hay que **desactivar Plug and Charge en el propio cargador**; desde el M5Dial no es posible garantizarlo.
+- **Limita también el máximo en la app del Beny** (por ejemplo a 16A). Si el M5Dial se apaga o se cuelga, nadie modula la carga, y al rearrancar la sesión el Beny sube a su propio máximo: ese límite es la única protección que queda.
 
 ## Control Dinámico (DLB): pasos suaves de 1A
 
@@ -209,11 +222,11 @@ La pantalla es redonda (GC9A01, 240×240). Todo se dibuja en un *canvas* fuera d
 | Fila | Contenido | Color |
 |------|-----------|-------|
 | 0 | Termo (ACS) | Ver [Termo Eléctrico](#termo-eléctrico-acs) |
-| 4 (izquierda) | Horas de depuradora hoy | Ver [Depuradora](#depuradora-de-la-piscina) |
 | 1 | Precio PVPC (€/kWh) | Verde < umbral, naranja < umbral + 0,02, rojo por encima |
 | 2 | Red: potencia actual / límite (kW) | Verde exportando, naranja < 5 kW, rojo ≥ 5 kW |
 | 3 | Producción solar (kW) | Verde > 50 W, naranja en otro caso |
 | 4 (grande) | Potencia de carga del Beny (kW) | Verde ~0 W, naranja ≤ 2 kW, rojo > 2 kW |
+| 4 (izquierda) | Horas de depuradora hoy | Ver [Depuradora](#depuradora-de-la-piscina) |
 | 5 | Modo: `SOLAR` / `BALANCEO` | Verde / naranja |
 | 6 | Amperaje objetivo (real) | Amarillo en el suelo de 6A, verde en otro caso |
 | 7 | Estado del cargador (truncado a 12 caracteres) | Blanco |
@@ -239,7 +252,7 @@ La pantalla es redonda (GC9A01, 240×240). Todo se dibuja en un *canvas* fuera d
 |---------|-------------|
 | `/start` | Muestra el mensaje de bienvenida con todos los comandos. |
 | `/help` | Lista todos los comandos disponibles. |
-| `/status` | Estado completo: red, solar, cargador, amperaje objetivo/real y modo activo. |
+| `/status` | Estado completo: precio, red, solar, cargador, amperaje objetivo/real, modo activo, termo y depuradora. |
 
 ### Modos de Carga
 | Comando | Descripción |
@@ -288,6 +301,7 @@ El sistema envía mensajes proactivos a Telegram cuando:
 - Se cambia de modo pulsando el dial del M5Dial.
 - El termo se corta por sobrecarga, y cuando se reactiva.
 - Hay sobrecarga sostenida que el sistema ya no puede resolver (coche al mínimo, termo sin consumo), y cuando se resuelve.
+- El M5Dial lleva más de 20 min sin enviar datos, y cuando vuelve. Este aviso no lo manda el M5Dial (no podría), sino el [vigilante](#vigilante-aviso-si-el-m5dial-deja-de-dar-señales) del script de Google.
 
 Las notificaciones **no se envían desde el punto donde se generan**: se encolan (hasta 4) y `loopTelegram()` entrega una por ciclo de polling. `bot.sendMessage()` es una petición HTTPS bloqueante de varios segundos, y llamarla desde `setup()` o desde la lógica de control podía agotar el watchdog de 30s y reiniciar el equipo.
 
@@ -303,18 +317,20 @@ CargadorBenyV2/
 │   ├── PiscinaTask.h       # Interfaz de la depuradora (modos, estado)
 │   ├── TelegramTask.h      # Interfaz del bot de Telegram
 │   ├── TermoTask.h         # Interfaz del termo (modos, estado)
-│   └── TuyaLocal.h         # Cliente Tuya local 3.4 / 3.5
+│   ├── TuyaLocal.h         # Cliente Tuya local 3.4 / 3.5
+│   └── config.h            # Credenciales (no se sube: .gitignore)
 ├── src/
 │   ├── main.cpp            # Setup, loop, DLB logic, UI, dial/táctil, salvapantallas
 │   ├── BenyTask.cpp        # Comunicación UDP con el cargador Beny
 │   ├── HuaweiTask.cpp      # Lectura Modbus TCP del inversor Huawei
 │   ├── TelegramTask.cpp    # Bot de Telegram (comandos + notificaciones)
 │   ├── EsiosTask.cpp       # Consulta de precios PVPC vía API ESIOS
-│   ├── GoogleSheetsTask.cpp# Envío horario de datos a Google Sheets
+│   ├── GoogleSheetsTask.cpp# Registro horario + diagnóstico (muestras y eventos)
 │   ├── TermoTask.cpp       # Reglas del termo: precio y sobrecarga
 │   ├── PiscinaTask.cpp     # Reglas de la depuradora: sol, horas, mínimo nocturno
 │   ├── TuyaLocal.cpp       # Protocolo Tuya 3.4 / 3.5 (sesión, AES) para los relés
-│   ├── config.h.example    # Plantilla de config.h (credenciales y constantes)
+│   └── config.h.example    # Plantilla de include/config.h (credenciales y constantes)
+├── google_apps_script.js   # Apps Script: registro, diagnóstico, exportación CSV y vigilante
 └── platformio.ini          # Configuración de PlatformIO
 ```
 
@@ -390,13 +406,14 @@ En la hoja de cálculo, *Extensiones → Apps Script* (o desde [script.google.co
 - **Inversor Solar Huawei** con Smart Meter Modbus TCP (puerto 502)
 - **Relé Tongou TO-Q-SY1-JWT** (Tuya WiFi, carril DIN, con medición) delante del termo eléctrico
 - Otro **Tongou TO-Q-SY1-JWT** delante de la depuradora y el clorador de la piscina
+- **Red WiFi** con acceso a Internet (para Telegram, ESIOS, Google Sheets)
+- **Alimentación fiable para el M5Dial** (cargador de calidad, 5 V / 2 A): los apagones del M5Dial dejan el coche sin control (los relés se protegen solos con su seguro)
 
 > ⚠️ **El inversor Huawei solo admite un cliente Modbus TCP a la vez.** Si hay otro equipo conectado (por ejemplo el M5StickC antiguo, Home Assistant…), el M5Dial conecta y el inversor corta la conexión al instante: en el log aparece `Connected successfully!` → `Lost Connection` y errores `0xE4`, y red y solar se quedan a 0.
-- **Red WiFi** con acceso a Internet (para Telegram, ESIOS, Google Sheets)
 
 ## Configuración Inicial
 
-1. **Copiar `src/config.h.example` a `src/config.h`** y rellenar tus credenciales:
+1. **Copiar `src/config.h.example` a `include/config.h`** y rellenar tus credenciales (`include/config.h` está en `.gitignore`):
    - `WIFI_SSID` / `WIFI_PASSWORD` — Red WiFi.
    - `BOT_TOKEN` / `CHAT_ID` — Token del bot de Telegram y tu Chat ID.
    - `BENY_IP` / `BENY_PIN` / `BENY_SERIAL` — Datos del cargador Beny.
@@ -439,7 +456,7 @@ Las claves `t_pause`, `t_resume` y `r_margin` de la pausa automática ya no se l
 
 ## Particiones de Flash (sin OTA)
 
-El proyecto **no incluye actualización OTA**: se carga siempre por USB. La placa `m5stack-stamps3` usa `default_8MB.csv` (dos ranuras de aplicación de 3,3 MB), así que no hace falta un esquema propio: el firmware ocupa en torno al **34 %** de una ranura, con margen holgado para crecer.
+El proyecto **no incluye actualización OTA**: se carga siempre por USB. La placa `m5stack-stamps3` usa `default_8MB.csv` (dos ranuras de aplicación de 3,3 MB), así que no hace falta un esquema propio: el firmware ocupa en torno al **35 %** de una ranura, con margen holgado para crecer.
 
 `platformio.ini` activa además `-DARDUINO_USB_CDC_ON_BOOT=1`; sin esa opción, `Serial` no sale por el USB nativo del ESP32-S3 y el monitor serie queda mudo.
 

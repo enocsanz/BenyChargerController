@@ -517,9 +517,15 @@ void loop() {
   // handling below. Skipping them keeps the device responsive during an outage.
   bool wifiUp = (WiFi.status() == WL_CONNECTED);
 
+  // The watchdog is fed between tasks: each one stays well under the 30s
+  // timeout on its own, but several slow network calls in the same pass
+  // (Telegram, the Sheets batch, ESIOS, reconnecting a relay) added up past
+  // it once (task_wdt reset on 01/10 at 22:08).
   if (wifiUp) {
     loopTelegram();
+    esp_task_wdt_reset();
     loopGoogleSheets();
+    esp_task_wdt_reset();
 
     static unsigned long lastMainLog = 0;
     if (millis() - lastMainLog > 10000) {
@@ -530,8 +536,11 @@ void loop() {
 
     loopBeny();
     loopEsios();
+    esp_task_wdt_reset();
     loopTermo();
+    esp_task_wdt_reset();
     loopPiscina();
+    esp_task_wdt_reset();
   }
 
   // --- SCREEN DISPATCHER (0.5s) ---

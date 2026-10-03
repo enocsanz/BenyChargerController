@@ -16,6 +16,7 @@ static const float START_MARGIN = 100;         // W over the pump's power to sta
 static const float STOP_FRACTION = 0.5;        // stop below this share of its power
 static const unsigned long MIN_ON = 1800000;   // 30 min
 static const unsigned long MIN_OFF = 900000;   // 15 min
+static const float MIN_LEFT = 900;             // s of today's max needed to start
 static const int FILL_END_HOUR = 8;            // top-up window: 00:00 - 08:00
 static const unsigned long SAVE_INTERVAL = 300000; // persist run time every 5 min
 static const unsigned long GRID_STALE = 30000;
@@ -213,7 +214,10 @@ void runPiscinaLogic() {
   if (piscina_mode != PISCINA_AUTO) {
     solarRun = false;
   } else if (!solarRun) {
-    if (haveAvg && gridFresh && runSecs < maxSecs && surplusAvg >= pumpWatts + START_MARGIN &&
+    // Not with less than MIN_LEFT of today's maximum left: it would only run
+    // a couple of minutes (seen: started with 2 min left, stopped at 2.5 min)
+    if (haveAvg && gridFresh && runSecs + MIN_LEFT < maxSecs &&
+        surplusAvg >= pumpWatts + START_MARGIN &&
         (!relay.switchOn ? inState >= MIN_OFF : true)) {
       solarRun = true;
       logEventf("PISCINA", "Arranque con sol (excedente medio %.0f W)", surplusAvg);

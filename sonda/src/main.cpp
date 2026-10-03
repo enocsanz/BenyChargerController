@@ -24,8 +24,15 @@ static uint32_t minSent = 0, minAcked = 0;
 static float lastMinutePct = -1;
 static bool otaReady = false;
 
-// Sends one message and waits for the controller's echo
-static bool sendOne() {
+// Echoes are counted whenever they arrive, not only within a short wait: the
+// controller answers from its main loop, which can be busy for a second or
+// two (Telegram, the Sheets batch). Waiting 300 ms counted those as lost: 64 %
+// next to the router, at -60 dBm. Any echo of one of the last ACK_WINDOW
+// messages counts, once.
+static const uint32_t ACK_WINDOW = 32;
+static uint32_t ackedSeq[ACK_WINDOW]; // seq confirmed in each slot
+
+static void sendOne() {
   SondaPacket p;
   p.magic = SONDA_MAGIC;
   p.seq = ++seq;
@@ -33,21 +40,24 @@ static bool sendOne() {
   p.temp = NAN; // no sensor yet
   udp.beginPacket(MAIN_IP, SONDA_UDP_PORT);
   udp.write((uint8_t *)&p, sizeof(p));
-  if (!udp.endPacket()) return false;
+  udp.endPacket();
+}
 
-  unsigned long t0 = millis();
-  while (millis() - t0 < 300) {
-    int n = udp.parsePacket();
-    if (n == sizeof(SondaPacket)) {
-      SondaPacket r;
-      udp.read((uint8_t *)&r, sizeof(r));
-      if (r.magic == SONDA_MAGIC && r.seq == p.seq) return true;
-    } else if (n > 0) {
+static void readEchoes() {
+  for (int n = udp.parsePacket(); n > 0; n = udp.parsePacket()) {
+    if (n != sizeof(SondaPacket)) {
       udp.flush();
+      continue;
     }
-    delay(2);
+    SondaPacket r;
+    udp.read((uint8_t *)&r, sizeof(r));
+    if (r.magic != SONDA_MAGIC || r.seq == 0 || r.seq > seq || seq - r.seq >= ACK_WINDOW) continue;
+    uint32_t &slot = ackedSeq[r.seq % ACK_WINDOW];
+    if (slot != r.seq) { // first echo of this message
+      slot = r.seq;
+      acked++;
+    }
   }
-  return false;
 }
 
 static void setupOta() {
@@ -119,10 +129,11 @@ void loop() {
     if (!otaReady) setupOta();
     ArduinoOTA.handle();
 
+    readEchoes();
     if (millis() - lastSend >= 1000) {
       lastSend = millis();
       sent++;
-      if (sendOne()) acked++;
+      sendOne();
     }
   }
 

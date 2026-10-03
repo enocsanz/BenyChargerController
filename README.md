@@ -275,7 +275,7 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 ### Diagnóstico
 | Comando | Descripción |
 |---------|-------------|
-| `/diag` | Estado del registro en Google Sheets: pendiente de enviar y resultado del último envío. |
+| `/diag` | Estado del registro en Google Sheets: pendiente de enviar y resultado del último envío (con su duración: la conexión TLS es lo primero que notaría una CPU más lenta). |
 | `/wifi` | Intensidad de la señal WiFi del controlador (dBm y valoración: buena > −67, aceptable > −75, justa > −80), red, canal e IP. |
 | `/diag_on` / `/diag_off` | Activa o para el registro por minuto y de eventos. |
 
@@ -358,7 +358,7 @@ Registro detallado para analizar durante unos días el funcionamiento de todo el
 
 | Pestaña | Contenido |
 |---------|-----------|
-| **Muestras** | Una fila por minuto: red (actual, mínimo y máximo del minuto, para ver los picos), solar, precio, modo, Beny (W, estado, amperios objetivo y reales), termo (estado, W, relé), depuradora (estado, W, relé, horas de hoy, sobrante medio) y salud del StampS3 (heap libre, RSSI WiFi, minutos encendido). |
+| **Muestras** | Una fila por minuto: red (actual, mínimo y máximo del minuto, para ver los picos), solar, precio, modo, Beny (W, estado, amperios objetivo y reales), termo (estado, W, relé), depuradora (estado, W, relé, horas de hoy, sobrante medio) y salud del StampS3 (heap libre, RSSI WiFi, minutos encendido, temperatura del chip). |
 | **Eventos** | Arranques (con la causa del reinicio: `panic`, `task_wdt`, `brownout`…), cambios de estado del Beny, decisiones y órdenes del termo y la depuradora, resumen diario de la depuradora, conexiones y desconexiones de los relés y del Huawei, reconexiones WiFi, cambios de modo con el botón y todos los comandos de Telegram. |
 
 - Las pestañas se crean solas, con cabecera, en el primer envío.
@@ -388,7 +388,7 @@ En la hoja de cálculo, *Extensiones → Apps Script* (o desde [script.google.co
 
 ## Hardware Necesario
 
-- **M5Stack StampS3** (ESP32-S3FN8, 8 MB de flash, sin PSRAM; LED RGB en G21 y botón en G0). Sin reloj con pila: la hora sale de NTP al arrancar.
+- **M5Stack StampS3** (ESP32-S3FN8, 8 MB de flash, sin PSRAM; LED RGB en G21 y botón en G0). Sin reloj con pila: la hora sale de NTP al arrancar. Funciona a **160 MHz** en vez de 240 (`board_build.f_cpu`), para que se caliente y consuma menos una vez encapsulado; la WiFi se mantiene siempre despierta (`WiFi.setSleep(false)`) porque el ahorro de la radio retrasaría las respuestas del Beny y del Huawei.
 - **Cargador Beny** con interfaz de red UDP (puerto 3333)
 - **Inversor Solar Huawei** con Smart Meter Modbus TCP (puerto 502)
 - **Relé Tongou TO-Q-SY1-JWT** (Tuya WiFi, carril DIN, con medición) delante del termo eléctrico

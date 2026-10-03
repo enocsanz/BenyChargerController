@@ -177,7 +177,8 @@ void setup() {
   int rr = (int)esp_reset_reason();
   String reason = (rr >= 0 && rr <= 10) ? resetNames[rr] : "?";
   sendTelegramNotification("🚀 Sistema Iniciado (" + reason + "). Modo actual: " + modeStr);
-  logEvent("ARRANQUE", "Reinicio: " + reason + ", modo " + modeStr);
+  logEvent("ARRANQUE", "Reinicio: " + reason + ", modo " + modeStr + ", CPU " +
+                           String(getCpuFrequencyMhz()) + " MHz");
 }
 
 void runSmartChargingLogic() {

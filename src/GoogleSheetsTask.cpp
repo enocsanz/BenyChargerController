@@ -119,6 +119,8 @@ static void takeSample() {
        String((int)ps.surplus);
   s += "," + String(ESP.getFreeHeap()) + "," + String(WiFi.RSSI()) + "," +
        String(millis() / 60000);
+  // Chip temperature, to keep an eye on it once the board is enclosed
+  s += "," + String(temperatureRead(), 1);
   s += "]";
 
   if (sampleCount == MAX_SAMPLES) {
@@ -148,8 +150,11 @@ static void sendBatch() {
   // that 302 already means the rows were written, so it is not followed.
   // A 200 is Google's own error page (e.g. an old deployment without doPost),
   // so it is a failure and the batch is kept.
+  // Timed: the TLS handshake is the first thing a lower CPU clock would slow
+  unsigned long t0 = millis();
   int code = http.POST(body);
   http.end();
+  float secs = (millis() - t0) / 1000.0;
 
   char when[12];
   struct tm t;
@@ -157,15 +162,16 @@ static void sendBatch() {
   else strcpy(when, "?");
 
   if (code == 302) {
-    Serial.printf("GoogleSheets: Diagnostico enviado (%d muestras, %d eventos, %u bytes)\n",
-                  sampleCount, eventCount, body.length());
+    Serial.printf("GoogleSheets: Diagnostico enviado (%d muestras, %d eventos, %u bytes, %.1f s)\n",
+                  sampleCount, eventCount, body.length(), secs);
     lastResult = String(when) + " OK (" + String(sampleCount) + " muestras, " +
-                 String(eventCount) + " eventos)";
+                 String(eventCount) + " eventos, " + String(secs, 1) + " s)";
     sampleCount = 0;
     eventCount = 0;
   } else {
     Serial.printf("GoogleSheets: Diagnostico fallo (%d), se reintenta\n", code);
-    lastResult = String(when) + " FALLO " + String(code) + ", se reintenta";
+    lastResult = String(when) + " FALLO " + String(code) + " (" + String(secs, 1) +
+                 " s), se reintenta";
   }
 }
 

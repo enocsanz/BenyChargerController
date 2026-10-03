@@ -55,7 +55,8 @@ static String systemText() {
   String up = min >= 1440 ? String(min / 1440) + " d " + String((min / 60) % 24) + " h"
                           : String(min / 60) + " h " + String(min % 60) + " min";
   return "📶 WiFi " + wifiText() + " | Encendido " + up + " | Memoria libre " +
-         String(ESP.getFreeHeap() / 1024) + " KB";
+         String(ESP.getFreeHeap() / 1024) + " KB | CPU " + String(getCpuFrequencyMhz()) +
+         " MHz, " + String(temperatureRead(), 0) + " C";
 }
 
 void handleNewMessages(int numNewMessages) {
@@ -242,6 +243,8 @@ void handleNewMessages(int numNewMessages) {
     } else if (textLower == "/wifi") {
       bot.sendMessage(chat_id, "📶 WiFi: " + wifiText() + "\n   Red " + WiFi.SSID() + ", canal " +
                                    String(WiFi.channel()) + ", IP " + WiFi.localIP().toString() +
+                                   "\n   Chip " + String(temperatureRead(), 0) + " C a " +
+                                   String(getCpuFrequencyMhz()) + " MHz" +
                                    "\n   Buena > -67, aceptable > -75, justa > -80 dBm", "");
     } else if (textLower == "/diag") {
       bot.sendMessage(chat_id, diagStatusText(), "");

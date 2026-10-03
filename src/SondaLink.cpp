@@ -17,6 +17,7 @@ static volatile unsigned long lastRxAt = 0;
 static volatile float lastTemp = NAN;
 static volatile uint32_t probeUptime = 0;
 static volatile bool lastViaUdp = false;
+static volatile int8_t probeRssi = 0;
 static bool started = false;
 static WiFiUDP udp;
 
@@ -41,6 +42,7 @@ static bool handlePacket(const uint8_t *data, int len, bool viaUdp) {
   lastTemp = p.temp;
   probeUptime = p.uptime;
   lastViaUdp = viaUdp;
+  probeRssi = p.rssi;
   return true;
 }
 
@@ -114,6 +116,11 @@ String sondaLinkText() {
   if (lastMinutePct >= 0) msg += "   Ultimo minuto: " + String(lastMinutePct, 0) + " % recibido\n";
   msg += "   Desde que arranco la sonda: " + String(pct(rxCount, lastSeq - firstSeq + 1), 0) + " % (" +
          String(rxCount) + " de " + String(lastSeq - firstSeq + 1) + ")\n";
+  if (probeRssi != 0) {
+    const char *q = probeRssi >= -67 ? "buena" : probeRssi >= -75 ? "aceptable"
+                    : probeRssi >= -80 ? "justa" : "mala";
+    msg += "   WiFi de la sonda: " + String(probeRssi) + " dBm (" + q + ")\n";
+  }
   msg += "   Sonda encendida " + String(probeUptime / 60) + " min";
   if (!isnan(lastTemp)) msg += " | Agua " + String(lastTemp, 1) + " C";
   return msg;

@@ -38,6 +38,7 @@ static void sendOne() {
   p.seq = ++seq;
   p.uptime = millis() / 1000;
   p.temp = NAN; // no sensor yet
+  p.rssi = (int8_t)WiFi.RSSI();
   udp.beginPacket(MAIN_IP, SONDA_UDP_PORT);
   udp.write((uint8_t *)&p, sizeof(p));
   udp.endPacket();

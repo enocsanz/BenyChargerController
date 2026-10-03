@@ -14,6 +14,7 @@ struct __attribute__((packed)) SondaPacket {
   uint32_t seq;    // +1 per message; restarts at 1 when the probe reboots
   uint32_t uptime; // probe uptime (s)
   float temp;      // water temperature (C); NAN while there is no sensor
+  int8_t rssi;     // probe's WiFi signal (dBm); 0 over ESP-NOW
 };
 
 #endif

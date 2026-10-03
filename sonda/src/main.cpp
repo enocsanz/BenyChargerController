@@ -8,6 +8,7 @@
 // message back as the confirmation.
 
 #include "SondaPacket.h"
+#include "WifiRoam.h"
 #include "config.h" // WIFI_SSID, WIFI_PASSWORD, OTA_PASSWORD (../include, not in git)
 #include <ArduinoOTA.h>
 #include <M5StickCPlus.h>
@@ -130,6 +131,7 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED) {
     if (!otaReady) setupOta();
     ArduinoOTA.handle();
+    wifiRoamLoop(WIFI_SSID, WIFI_PASSWORD, [](const String &m) { Serial.println(m); });
 
     readEchoes();
     if (millis() - lastSend >= 1000) {

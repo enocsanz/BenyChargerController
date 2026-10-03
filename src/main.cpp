@@ -6,6 +6,7 @@
 #include "TermoTask.h"
 #include "PiscinaTask.h"
 #include "SondaLink.h"
+#include "WifiRoam.h"
 
 #include "config.h"
 #include <Arduino.h>
@@ -144,7 +145,9 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Beny DLB - M5StampS3");
 
-  // WiFi
+  // WiFi. Not persistent: the IDF would otherwise keep the last access point in
+  // flash and reuse it, instead of choosing the strongest one at each boot.
+  WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false); // Modem sleep adds latency to the Beny UDP / Modbus polls
   WiFi.setAutoReconnect(true);
@@ -441,6 +444,7 @@ void loop() {
   }
 
   loopSondaLink();
+  if (wifiUp) wifiRoamLoop(WIFI_SSID, WIFI_PASSWORD, [](const String &m) { logEvent("WIFI", m); });
   updateLed();
 
   // --- TELEMETRY LOGGING (1s) ---

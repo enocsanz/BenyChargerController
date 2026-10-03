@@ -238,7 +238,7 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 |---------|-------------|
 | `/start` | Muestra el mensaje de bienvenida con todos los comandos. |
 | `/help` | Lista todos los comandos disponibles. |
-| `/status` | Estado completo: precio, red, solar, cargador, amperaje objetivo/real, modo activo, termo y depuradora. |
+| `/status` | Estado completo: precio, red, solar, cargador, amperaje objetivo/real, modo activo, termo, depuradora y una línea del controlador (WiFi, tiempo encendido, memoria libre). |
 
 ### Modos de Carga
 | Comando | Descripción |
@@ -276,6 +276,7 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 | Comando | Descripción |
 |---------|-------------|
 | `/diag` | Estado del registro en Google Sheets: pendiente de enviar y resultado del último envío. |
+| `/wifi` | Intensidad de la señal WiFi del controlador (dBm y valoración: buena > −67, aceptable > −75, justa > −80), red, canal e IP. |
 | `/diag_on` / `/diag_off` | Activa o para el registro por minuto y de eventos. |
 
 ### Comandos retirados

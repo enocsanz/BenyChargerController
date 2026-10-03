@@ -42,6 +42,22 @@ void setupTelegram() {
 
 String last_chat_id = ""; // Store for proactive notifications
 
+// WiFi signal with a plain-words rating, to place the controller well
+static String wifiText() {
+  long rssi = WiFi.RSSI();
+  const char *q = rssi >= -67 ? "buena" : rssi >= -75 ? "aceptable" : rssi >= -80 ? "justa" : "mala";
+  return String(rssi) + " dBm (" + q + ")";
+}
+
+// One line about the controller itself: WiFi, uptime, free memory
+static String systemText() {
+  unsigned long min = millis() / 60000;
+  String up = min >= 1440 ? String(min / 1440) + " d " + String((min / 60) % 24) + " h"
+                          : String(min / 60) + " h " + String(min % 60) + " min";
+  return "📶 WiFi " + wifiText() + " | Encendido " + up + " | Memoria libre " +
+         String(ESP.getFreeHeap() / 1024) + " KB";
+}
+
 void handleNewMessages(int numNewMessages) {
   Serial.println("Telegram: Handling messages...");
 
@@ -82,6 +98,7 @@ void handleNewMessages(int numNewMessages) {
       msg += "/set_piscina_horas MAX MIN - Horas de este mes (ej: /set_piscina_horas 6 3)\n\n";
       msg += "DIAGNOSTICO:\n";
       msg += "/diag - Estado del registro en Google Sheets\n";
+      msg += "/wifi - Intensidad de la senal WiFi del controlador\n";
       msg += "/diag_on /diag_off - Activa o para el registro por minuto\n";
       bot.sendMessage(chat_id, msg, "");
     } else if (textLower == "/status") {
@@ -116,6 +133,7 @@ void handleNewMessages(int numNewMessages) {
       }
       msg += "\n" + termoStatusText() + "\n";
       msg += "\n" + piscinaStatusText() + "\n";
+      msg += "\n" + systemText() + "\n";
 
       bot.sendMessage(chat_id, msg, "");
 
@@ -221,6 +239,10 @@ void handleNewMessages(int numNewMessages) {
         bot.sendMessage(chat_id, "Uso: /set_piscina_horas MAX MIN (horas, MIN <= MAX <= 24). "
                                  "Ej: /set_piscina_horas 6 3", "");
       }
+    } else if (textLower == "/wifi") {
+      bot.sendMessage(chat_id, "📶 WiFi: " + wifiText() + "\n   Red " + WiFi.SSID() + ", canal " +
+                                   String(WiFi.channel()) + ", IP " + WiFi.localIP().toString() +
+                                   "\n   Buena > -67, aceptable > -75, justa > -80 dBm", "");
     } else if (textLower == "/diag") {
       bot.sendMessage(chat_id, diagStatusText(), "");
     } else if (textLower == "/diag_on" || textLower == "/diag on") {

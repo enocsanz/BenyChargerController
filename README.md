@@ -287,7 +287,7 @@ Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el L
 | Comando | Descripción |
 |---------|-------------|
 | `/diag` | Estado del registro en Google Sheets: pendiente de enviar y resultado del último envío (con su duración: la conexión TLS es lo primero que notaría una CPU más lenta). |
-| `/sonda` | Enlace con la sonda del termo: % de mensajes recibidos (último minuto y total), vía (WiFi o ESP-NOW) y último mensaje. `/espnow` también vale. |
+| `/sonda` | Enlace con la sonda del termo: % de mensajes recibidos (último minuto y total), vía (WiFi o ESP-NOW) y último mensaje. |
 | `/version` | Versión del firmware (fecha y hora de compilación), IP y cómo actualizarlo. |
 | `/wifi` | Intensidad de la señal WiFi del controlador (dBm y valoración: buena > −67, aceptable > −75, justa > −80), red, canal e IP. |
 | `/diag_on` / `/diag_off` | Activa o para el registro por minuto y de eventos. |

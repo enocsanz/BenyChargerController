@@ -256,7 +256,7 @@ void handleNewMessages(int numNewMessages) {
         bot.sendMessage(chat_id, "Uso: /set_piscina_horas MAX MIN (horas, MIN <= MAX <= 24). "
                                  "Ej: /set_piscina_horas 6 3", "");
       }
-    } else if (textLower == "/sonda" || textLower == "/espnow") {
+    } else if (textLower == "/sonda") {
       bot.sendMessage(chat_id, sondaLinkText(), "");
     } else if (textLower == "/version") {
       bot.sendMessage(chat_id, "🧩 Firmware " + String(FW_BUILD) + "\n   IP " +

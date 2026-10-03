@@ -21,7 +21,7 @@ static const int FILL_END_HOUR = 8;            // top-up window: 00:00 - 08:00
 static const unsigned long SAVE_INTERVAL = 300000; // persist run time every 5 min
 static const unsigned long GRID_STALE = 30000;
 static const unsigned long CMD_RETRY = 10000;
-// Relay's own countdown while running: stops by itself if the M5Dial stops
+// Relay's own countdown while running: stops by itself if the controller stops
 static const uint32_t FAILSAFE_SECS = 900; // 15 min
 
 int piscina_mode = PISCINA_AUTO;
@@ -272,7 +272,7 @@ void runPiscinaLogic() {
   } else if (desired == relay.switchOn) {
     // While running in AUTO the relay counts down FAILSAFE_SECS and stops the
     // pump by itself if this controller stops (seen: 2.8 h running unattended
-    // during a power cut of the M5Dial). Not with PISCINA_ON, the user's own.
+    // during a power cut of the controller). Not with PISCINA_ON, the user's own.
     relay.keepFailsafe(desired && piscina_mode == PISCINA_AUTO ? FAILSAFE_SECS : 0);
   }
 }

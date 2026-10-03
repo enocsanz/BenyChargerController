@@ -1,10 +1,10 @@
-// Google Apps Script for the Beny DLB controller (M5Dial).
+// Google Apps Script for the Beny DLB controller (M5StampS3).
 //
 //  - doGet  ?date=...&time=...   hourly row in the first sheet (unchanged)
 //  - doPost {samples, events}    diagnostic batch -> "Muestras" / "Eventos"
 //  - doGet  ?export=Muestras&key=...&rows=N   last N rows as CSV
 //
-//  - checkWatchdog (timer)       Telegram alert when the M5Dial goes silent
+//  - checkWatchdog (timer)       Telegram alert when the controller goes silent
 //
 // After pasting it: Deploy > Manage deployments > edit > Version: New version.
 // The URL stays the same, so the firmware does not need to change.
@@ -130,7 +130,7 @@ function exportCsv(params) {
 }
 
 // --- Watchdog -------------------------------------------------------------
-// The M5Dial sends a batch every 5 min. If nothing arrives for WATCHDOG_MIN,
+// The controller sends a batch every 5 min. If nothing arrives for WATCHDOG_MIN,
 // it is down (power, WiFi, hang): nothing controls the car, the heater or the
 // pool any more, so the user is told on Telegram, and again when it is back.
 // The relays protect themselves meanwhile with their own countdown.
@@ -145,7 +145,7 @@ function checkWatchdog() {
   var when = Utilities.formatDate(new Date(last), 'Europe/Madrid', 'dd/MM HH:mm');
 
   if (!alerted && silentMin > WATCHDOG_MIN) {
-    if (sendTelegram('⚠️ El M5Dial no envia datos desde las ' + when + ' (hace ' +
+    if (sendTelegram('⚠️ El controlador no envia datos desde las ' + when + ' (hace ' +
                      Math.round(silentMin) + ' min). Puede estar sin alimentacion o sin ' +
                      'WiFi: nadie controla el coche. El termo y la depuradora vuelven a su ' +
                      'estado seguro solos en 15 min.')) {
@@ -155,7 +155,7 @@ function checkWatchdog() {
   } else if (alerted && silentMin <= WATCHDOG_MIN) {
     var since = parseInt(props.getProperty('wdSince') || String(last), 10);
     var downMin = Math.round((last - since) / 60000);
-    if (sendTelegram('✅ El M5Dial vuelve a enviar datos (unos ' + downMin + ' min sin senal).')) {
+    if (sendTelegram('✅ El controlador vuelve a enviar datos (unos ' + downMin + ' min sin senal).')) {
       props.setProperty('wdAlerted', '0');
     }
   }
@@ -187,5 +187,5 @@ function setupWatchdog() {
 
 // Run from the editor to check the Telegram settings
 function testTelegram() {
-  sendTelegram('🔔 Prueba del vigilante del M5Dial: los avisos llegaran a este chat.');
+  sendTelegram('🔔 Prueba del vigilante del controlador: los avisos llegaran a este chat.');
 }

@@ -1,18 +1,21 @@
 # CargadorBenyV2 — Control Inteligente de Carga EV
 
-Sistema de control de carga para vehículos eléctricos basado en **M5Stack Dial V1.1 (ESP32-S3)**, diseñado para gestionar un cargador **Beny** en combinación con un inversor solar **Huawei** y datos de precios eléctricos del mercado español (PVPC/ESIOS). También gestiona el **termo eléctrico (ACS)** y la **depuradora de la piscina** mediante relés Tuya controlados en local.
+Sistema de control de carga para vehículos eléctricos basado en un **M5Stack StampS3 (ESP32-S3)**, diseñado para gestionar un cargador **Beny** en combinación con un inversor solar **Huawei** y datos de precios eléctricos del mercado español (PVPC/ESIOS). También gestiona el **termo eléctrico (ACS)** y la **depuradora de la piscina** mediante relés Tuya controlados en local.
 
 El objetivo principal es maximizar el autoconsumo solar, proteger la instalación eléctrica y permitir el control remoto total vía **Telegram**.
 
-> La versión anterior para **M5StickC Plus** está congelada en la etiqueta git [`v1-m5stickcplus`](../../tree/v1-m5stickcplus).
+No tiene pantalla: todos los datos se consultan por Telegram (`/status`), y el StampS3 solo tiene un **LED de estado** y un **botón** para cambiar de modo. Ver [LED y botón](#led-y-botón-stamps3).
+
+> Versiones anteriores, congeladas en etiquetas git: **M5StickC Plus** en [`v1-m5stickcplus`](../../tree/v1-m5stickcplus) y **M5Stack Dial** (pantalla redonda) en [`v2-m5dial`](../../tree/v2-m5dial). El Dial lleva dentro un StampS3A con el mismo chip, así que todo lo que habla con la red es idéntico; solo cambian la pantalla y los controles.
 
 ## Mejoras de Estabilidad
 
-Versión M5Dial:
+Versiones M5Dial y StampS3 (ESP32-S3):
 
-- **Seguro en los relés si el M5Dial cae**: la cuenta atrás propia de cada relé Tuya hace de *dead man's switch*: el termo vuelve a encenderse y la depuradora se apaga solos si el M5Dial deja de renovarla. Ver [Seguro si el M5Dial deja de funcionar](#seguro-si-el-m5dial-deja-de-funcionar).
-- **Vigilante con aviso por Telegram**: el script de Google avisa si el M5Dial lleva más de 20 min sin enviar datos (apagones, WiFi, cuelgues). Ver [Vigilante](#vigilante-aviso-si-el-m5dial-deja-de-dar-señales).
+- **Seguro en los relés si el StampS3 cae**: la cuenta atrás propia de cada relé Tuya hace de *dead man's switch*: el termo vuelve a encenderse y la depuradora se apaga solos si el StampS3 deja de renovarla. Ver [Seguro si el StampS3 deja de funcionar](#seguro-si-el-stamps3-deja-de-funcionar).
+- **Vigilante con aviso por Telegram**: el script de Google avisa si el StampS3 lleva más de 20 min sin enviar datos (apagones, WiFi, cuelgues). Ver [Vigilante](#vigilante-aviso-si-el-stamps3-deja-de-dar-señales).
 - **DLB con pasos suaves de 1A**, que actúa solo con lecturas nuevas de red y espera a que el coche siga cada paso. Ver [Control Dinámico](#control-dinámico-dlb-pasos-suaves-de-1a).
+- **Varios servidores NTP**: el StampS3 no tiene reloj con pila (el Dial sí, y tapaba que NTP a veces tardaba minutos).
 - **Hora sin condición de carrera**: `getLocalTime(&t, 0)` devolvía "sin hora" al azar y el precio salía como desconocido un segundo cada pocos minutos, lo que encendía y apagaba el termo (190 veces en un día). Se usa `timeNow()` (`time()` + `localtime_r`).
 - **Watchdog alimentado entre tareas de red**: varias conexiones lentas en la misma vuelta del bucle llegaron a sumar más de 30 s.
 - **Precios ESIOS por día**: se recargan al cambiar de día (antes, tras medianoche, se servían los del día anterior) y un fallo se reintenta una vez por minuto.
@@ -34,11 +37,11 @@ Versión M5StickC Plus:
 ┌─────────────┐     Modbus TCP     ┌──────────────────┐
 │  Huawei     │◄──────────────────►│                  │
 │  Inversor   │  (Grid + PV data)  │                  │
-└─────────────┘                    │   M5Stack Dial   │
+└─────────────┘                    │  M5Stack StampS3 │
                                    │    (ESP32-S3)    │
 ┌─────────────┐     UDP/TCP        │                  │
 │  Beny       │◄──────────────────►│  - DLB Logic     │
-│  Cargador   │  (Control carga)   │  - Pantalla/Dial │
+│  Cargador   │  (Control carga)   │  - LED / botón   │
 └─────────────┘                    │  - Telegram Bot  │
                                    │  - Google Sheets │
 ┌─────────────┐     HTTPS          │  - ESIOS/PVPC   │
@@ -75,9 +78,9 @@ Consecuencias que hay que tener presentes:
 
 - El consumo mínimo del cargador mientras hay un coche enchufado es **6A (~1.4kW)**. Si no hay sol, ese consumo se toma de la red incluso en modo Solar.
 - **Configura `/set_limit` contando con ese consumo residual.** El límite debe dejar margen para los 6A del cargador por debajo de tu potencia contratada; el DLB no puede bajar de ahí.
-- Cuando el sistema está en el suelo de 6A lo señala explícitamente: la fila de amperios de la pantalla pasa a amarillo y `/status` incluye un aviso.
-- Si quieres un corte real de la carga, hay que **desactivar Plug and Charge en el propio cargador**; desde el M5Dial no es posible garantizarlo.
-- **Limita también el máximo en la app del Beny** (por ejemplo a 16A). Si el M5Dial se apaga o se cuelga, nadie modula la carga, y al rearrancar la sesión el Beny sube a su propio máximo: ese límite es la única protección que queda.
+- Cuando el sistema está en el suelo de 6A lo señala explícitamente: `/status` incluye un aviso, y el LED se pone naranja si además se supera el límite.
+- Si quieres un corte real de la carga, hay que **desactivar Plug and Charge en el propio cargador**; desde el StampS3 no es posible garantizarlo.
+- **Limita también el máximo en la app del Beny** (por ejemplo a 16A). Si el StampS3 se apaga o se cuelga, nadie modula la carga, y al rearrancar la sesión el Beny sube a su propio máximo: ese límite es la única protección que queda.
 
 ## Control Dinámico (DLB): pasos suaves de 1A
 
@@ -98,7 +101,7 @@ La variación que queda se debe sobre todo a los consumos de la casa (lavadora, 
 
 ## Termo Eléctrico (ACS)
 
-El termo tiene su propio termostato mecánico. Delante lleva un relé de carril **Tongou TO-Q-SY1-JWT** con medición de potencia. El M5Dial no hace calentar al termo: solo **habilita o corta** el relé, y con el relé cerrado sigue mandando el termostato.
+El termo tiene su propio termostato mecánico. Delante lleva un relé de carril **Tongou TO-Q-SY1-JWT** con medición de potencia. El StampS3 no hace calentar al termo: solo **habilita o corta** el relé, y con el relé cerrado sigue mandando el termostato.
 
 ### Reglas
 
@@ -123,11 +126,7 @@ Para saber si el termo cabe se usa su **potencia real**, que el relé mide cada 
 | `ON` | Se ignora | Corta |
 | `OFF` | Relé siempre abierto | — |
 
-En `AUTO` el M5Dial manda sobre el relé: si se enciende o apaga desde la app Smart Life, lo devuelve a su estado en unos segundos. Para mandar a mano, usa `/termo_on` o `/termo_off`.
-
-### Pantalla
-
-Fila superior: `ACS 2.0kW` en cian cuando calienta, `ACS OK` en verde cuando está habilitado en reposo, `ACS CARO` en naranja (cortado por precio), `ACS CORTE` en rojo (cortado por sobrecarga), `ACS OFF` en blanco (manual) y `ACS ?` en gris (sin conexión con el relé).
+En `AUTO` el StampS3 manda sobre el relé: si se enciende o apaga desde la app Smart Life, lo devuelve a su estado en unos segundos. Para mandar a mano, usa `/termo_on` o `/termo_off`.
 
 ### Control local (Tuya 3.4 / 3.5)
 
@@ -138,7 +137,7 @@ Los relés se controlan **en local**, sin la nube de Tuya (`src/TuyaLocal.cpp`),
 | 3.5 | `0x6699` | AES-128-GCM | Termo |
 | 3.4 | `0x55AA` | AES-128-ECB + HMAC-SHA256 | Depuradora |
 
-Se consulta el estado cada 10 s, y el relé además avisa de cada cambio. Si la conexión cae, se reintenta cada 30 s. Tras reiniciar el M5Dial, es normal que el relé cierre la primera sesión (aún tiene abierta la anterior) y que entre al segundo intento.
+Se consulta el estado cada 10 s, y el relé además avisa de cada cambio. Si la conexión cae, se reintenta cada 30 s. Tras reiniciar el StampS3, es normal que el relé cierre la primera sesión (aún tiene abierta la anterior) y que entre al segundo intento.
 
 La **clave local** solo se obtiene una vez desde la nube:
 
@@ -146,20 +145,20 @@ La **clave local** solo se obtiene una vez desde la nube:
 2. `python -m tinytuya wizard` en la carpeta del proyecto. Genera `devices.json` (con las claves) y `tinytuya.json` (con el API Secret), que están en `.gitignore`.
 3. Copiar la clave de cada relé a `TERMO_LOCAL_KEY` / `PISCINA_LOCAL_KEY` en `config.h`. La versión de protocolo de cada relé la da `python -m tinytuya scan`.
 
-Después la suscripción a la nube puede caducar, porque el M5Dial no la usa. La clave cambia si el relé se vuelve a emparejar en la app.
+Después la suscripción a la nube puede caducar, porque el StampS3 no la usa. La clave cambia si el relé se vuelve a emparejar en la app.
 
-> ⚠️ Dale a cada relé una **IP fija por DHCP** en el router. El M5Dial se conecta a `TERMO_IP` / `PISCINA_IP`: si el router le cambia la IP, deja de encontrarlo.
+> ⚠️ Dale a cada relé una **IP fija por DHCP** en el router. El StampS3 se conecta a `TERMO_IP` / `PISCINA_IP`: si el router le cambia la IP, deja de encontrarlo.
 
-### Seguro si el M5Dial deja de funcionar
+### Seguro si el StampS3 deja de funcionar
 
-Los relés tienen una **cuenta atrás propia** (DP 9, `countdown_1`): cuando llega a cero, el relé **invierte su estado él solo**, sin el M5Dial (comprobado: apagado + cuenta atrás de 10 s → se encendió a los 9 s). El M5Dial la usa como *dead man's switch* (`TuyaLocal::keepFailsafe`):
+Los relés tienen una **cuenta atrás propia** (DP 9, `countdown_1`): cuando llega a cero, el relé **invierte su estado él solo**, sin el StampS3 (comprobado: apagado + cuenta atrás de 10 s → se encendió a los 9 s). El StampS3 la usa como *dead man's switch* (`TuyaLocal::keepFailsafe`):
 
-| Relé | Cuándo se arma | Si el M5Dial deja de renovarla |
+| Relé | Cuándo se arma | Si el StampS3 deja de renovarla |
 |------|----------------|--------------------------------|
 | **Termo** | Mientras está cortado (precio o sobrecarga), salvo con `/termo_off` | Se **enciende** solo: no os quedáis sin agua caliente. |
 | **Depuradora** | Mientras funciona en `AUTO` | Se **apaga** sola: no sigue funcionando horas sin control. |
 
-La cuenta atrás es de **15 min** y se renueva cada 5 min, así que solo llega a cero si el M5Dial lleva más de 10 min sin poder hablar con el relé. Los cambios de armado quedan en Eventos (`seguro activado` / `seguro desactivado`). El termo está configurado para recordar su estado tras un corte de luz (`relay_status = memory`), y ningún relé tiene temporizadores propios en la app.
+La cuenta atrás es de **15 min** y se renueva cada 5 min, así que solo llega a cero si el StampS3 lleva más de 10 min sin poder hablar con el relé. Los cambios de armado quedan en Eventos (`seguro activado` / `seguro desactivado`). El termo está configurado para recordar su estado tras un corte de luz (`relay_status = memory`), y ningún relé tiene temporizadores propios en la app.
 
 ## Depuradora de la Piscina
 
@@ -169,7 +168,7 @@ La depuradora (motor de velocidad variable + clorador salino) va detrás de otro
 
 `sobrante = producción solar − consumo de la casa sin el coche ni la depuradora` (= coche + depuradora − red, limitado a la producción solar). Como no descuenta el coche, **la depuradora tiene prioridad sobre el coche** en cualquier modo de carga; el DLB le da al coche lo que queda.
 
-El sobrante se promedia (media móvil exponencial de **5 min**) para que una nube no la pare. Durante el primer minuto tras arrancar el M5Dial se usa una media simple y no se toca el relé.
+El sobrante se promedia (media móvil exponencial de **5 min**) para que una nube no la pare. Durante el primer minuto tras arrancar el StampS3 se usa una media simple y no se toca el relé.
 
 ### Reglas
 
@@ -178,7 +177,7 @@ El sobrante se promedia (media móvil exponencial de **5 min**) para que una nub
 | **Arranque** | Sobrante medio ≥ `PISCINA_POWER` + 100 W (500 W), parada desde hace ≥ 15 min y por debajo del máximo de hoy. |
 | **Parada** | Sobrante medio < 50 % de `PISCINA_POWER` (200 W) tras ≥ 30 min encendida, o máximo de hoy cumplido. |
 | **Mínimo** | Si un día no llega al mínimo, lo que falte se completa **esa madrugada (00-08 h) en las horas más baratas** (PVPC). Sin precios, se completa en cuanto empieza la madrugada. Lo no completado a las 08 h se descarta. |
-| **Arranque del M5Dial** | Si el relé está encendido, se adopta como funcionamiento con sol recién empezado: se le respetan los 30 min y solo se para por las reglas normales (sobrante < 200 W o máximo diario), aunque el sobrante no llegue al umbral de arranque. Si está apagado, puede arrancar sin esperar. |
+| **Arranque del StampS3** | Si el relé está encendido, se adopta como funcionamiento con sol recién empezado: se le respetan los 30 min y solo se para por las reglas normales (sobrante < 200 W o máximo diario), aunque el sobrante no llegue al umbral de arranque. Si está apagado, puede arrancar sin esperar. |
 
 `PISCINA_POWER` es **fijo (400 W)**: el motor es de velocidad variable y cambia de consumo cada cierto tiempo (se han medido 150-460 W), así que aprender la potencia movería los umbrales.
 
@@ -191,11 +190,7 @@ El sobrante se promedia (media móvil exponencial de **5 min**) para que una nub
 
 Valores por defecto en `PISCINA_MAX_HOURS` / `PISCINA_MIN_HOURS`. `/set_piscina_horas MAX MIN` cambia los del mes en curso y se guardan. El tiempo de hoy se guarda cada 5 min, así que sobrevive a un reinicio.
 
-### Pantalla
-
-A la izquierda del número grande, las horas de hoy (`2.1h`): azul cielo funcionando con sol, violeta completando el mínimo, verde con el máximo cumplido, gris esperando sol, blanco en manual. No aparece sin conexión con el relé.
-
-> Quita cualquier **programación horaria** del relé en la app Smart Life: en `AUTO` el M5Dial manda sobre él y la devolvería a su estado.
+> Quita cualquier **programación horaria** del relé en la app Smart Life: en `AUTO` el StampS3 manda sobre él y la devolvería a su estado.
 
 ## Reconexión WiFi
 
@@ -211,39 +206,30 @@ Puntos clave del diseño:
 
 - **El arranque nunca reinicia por falta de WiFi.** Antes, un fallo de conexión en `setup()` provocaba `ESP.restart()` a los 30s, y con el router caído eso era un **bucle de reinicio infinito**: 30s de puntos en pantalla, reinicio, otros 30s de puntos… El equipo nunca llegaba al bucle principal. Ese es el síntoma de "pantalla negra llenándose de puntos".
 - **El umbral de reinicio es largo (15 min) a propósito.** Reiniciar no arregla un router que sigue caído; solo tira la hora de funcionamiento y esconde el problema.
-- **Las tareas de red se saltan sin enlace.** Telegram, ESIOS, Google Sheets, Huawei y Beny no se ejecutan mientras no hay WiFi: intentar conexiones imposibles consume el ciclo (un handshake TLS puede tardar segundos) y dejaba sin tiempo a la propia lógica de reconexión y a los controles.
+- **Las tareas de red se saltan sin enlace.** Telegram, ESIOS, Google Sheets, Huawei y Beny no se ejecutan mientras no hay WiFi: intentar conexiones imposibles consume el ciclo (un handshake TLS puede tardar segundos) y dejaba sin tiempo a la propia lógica de reconexión y al botón.
 - **El DLB también se detiene sin enlace**, porque las lecturas de Beny y Huawei estarían obsoletas y ninguna orden llegaría al cargador.
-- La pantalla muestra un **anillo rojo en el borde** mientras dura la caída, para no confundir una desconexión con un equipo colgado mostrando datos viejos. Al arrancar sin red aparece `WiFi: SIN RED`.
+- El **LED se pone rojo** mientras dura la caída.
 
-## Pantalla y Controles (M5Dial)
+## LED y Botón (StampS3)
 
-La pantalla es redonda (GC9A01, 240×240). Todo se dibuja en un *canvas* fuera de pantalla de 8 bits (~57 KB de RAM, el StampS3A no tiene PSRAM) y se vuelca de una vez cada 500 ms, sin parpadeo. Las filas van centradas y las de los extremos llevan el texto más corto, porque el ancho útil se estrecha hacia arriba y abajo.
+Sin pantalla: los datos se consultan por Telegram. El StampS3 tiene un LED RGB (G21) y un botón (G0).
 
-| Fila | Contenido | Color |
-|------|-----------|-------|
-| 0 | Termo (ACS) | Ver [Termo Eléctrico](#termo-eléctrico-acs) |
-| 1 | Precio PVPC (€/kWh) | Verde < umbral, naranja < umbral + 0,02, rojo por encima |
-| 2 | Red: potencia actual / límite (kW) | Verde exportando, naranja < 5 kW, rojo ≥ 5 kW |
-| 3 | Producción solar (kW) | Verde > 50 W, naranja en otro caso |
-| 4 (grande) | Potencia de carga del Beny (kW) | Verde ~0 W, naranja ≤ 2 kW, rojo > 2 kW |
-| 4 (izquierda) | Horas de depuradora hoy | Ver [Depuradora](#depuradora-de-la-piscina) |
-| 5 | Modo: `SOLAR` / `BALANCEO` | Verde / naranja |
-| 6 | Amperaje objetivo (real) | Amarillo en el suelo de 6A, verde en otro caso |
-| 7 | Estado del cargador (truncado a 12 caracteres) | Blanco |
-| Borde | Anillo rojo | Solo sin WiFi |
+### LED de estado
 
-### Controles
+| Color | Significado |
+|-------|-------------|
+| 🔴 Rojo | Sin WiFi: no se puede leer ni mandar nada. |
+| 🟠 Naranja | Sobrecarga: termo cortado por sobrecarga, o coche ya a 6A y la red por encima del límite. |
+| 🔵 Azul | Coche cargando. Azul fijo también mientras arranca. |
+| 🟢 Verde | Todo en orden. |
 
-| Acción | Efecto |
-|--------|--------|
-| **Girar el dial** | Despierta la pantalla. |
-| **Tocar la pantalla** | Despierta la pantalla. |
-| **Pulsar el dial** | Si la pantalla está dormida, la despierta; si ya está encendida, alterna el modo Solar ↔ Balanceo (y avisa por Telegram). |
+Cada 2 s da un destello blanco tenue: indica que el programa está vivo. Si el LED se queda fijo sin destello, el programa está colgado (el watchdog lo reiniciará). El brillo está muy bajado (`LED_LEVEL`) porque a tope deslumbra.
 
-### Salvapantallas
+### Botón
 
-- La pantalla se apaga tras **2 minutos** de inactividad (brillo a 0 y *sleep* del panel).
-- Se despierta con cualquiera de los controles anteriores o al cambiar el modo remotamente vía Telegram.
+**Pulsar el botón** alterna el modo Solar ↔ Balanceo y avisa por Telegram.
+
+> El botón es también el **G0** de arranque: si se mantiene pulsado mientras se conecta la alimentación, el StampS3 entra en modo descarga (para programarlo) en vez de arrancar el programa. En funcionamiento normal no afecta.
 
 ## Comandos de Telegram
 
@@ -297,11 +283,11 @@ La pantalla es redonda (GC9A01, 240×240). Todo se dibuja en un *canvas* fuera d
 
 ### Notificaciones Automáticas
 El sistema envía mensajes proactivos a Telegram cuando:
-- Se inicia el sistema (indicando el modo activo).
-- Se cambia de modo pulsando el dial del M5Dial.
+- Se inicia el sistema, con la causa del reinicio (`encendido` = falta de alimentación, `task_wdt` = cuelgue, `brownout` = bajada de tensión…) y el modo activo.
+- Se cambia de modo con el botón del StampS3.
 - El termo se corta por sobrecarga, y cuando se reactiva.
 - Hay sobrecarga sostenida que el sistema ya no puede resolver (coche al mínimo, termo sin consumo), y cuando se resuelve.
-- El M5Dial lleva más de 20 min sin enviar datos, y cuando vuelve. Este aviso no lo manda el M5Dial (no podría), sino el [vigilante](#vigilante-aviso-si-el-m5dial-deja-de-dar-señales) del script de Google.
+- El StampS3 lleva más de 20 min sin enviar datos, y cuando vuelve. Este aviso no lo manda el StampS3 (no podría), sino el [vigilante](#vigilante-aviso-si-el-stamps3-deja-de-dar-señales) del script de Google.
 
 Las notificaciones **no se envían desde el punto donde se generan**: se encolan (hasta 4) y `loopTelegram()` entrega una por ciclo de polling. `bot.sendMessage()` es una petición HTTPS bloqueante de varios segundos, y llamarla desde `setup()` o desde la lógica de control podía agotar el watchdog de 30s y reiniciar el equipo.
 
@@ -320,7 +306,7 @@ CargadorBenyV2/
 │   ├── TuyaLocal.h         # Cliente Tuya local 3.4 / 3.5
 │   └── config.h            # Credenciales (no se sube: .gitignore)
 ├── src/
-│   ├── main.cpp            # Setup, loop, DLB logic, UI, dial/táctil, salvapantallas
+│   ├── main.cpp            # Setup, loop, lógica DLB, botón y LED de estado
 │   ├── BenyTask.cpp        # Comunicación UDP con el cargador Beny
 │   ├── HuaweiTask.cpp      # Lectura Modbus TCP del inversor Huawei
 │   ├── TelegramTask.cpp    # Bot de Telegram (comandos + notificaciones)
@@ -342,7 +328,7 @@ CargadorBenyV2/
 | Beny (UDP) | 2s | Lectura de estado del cargador. |
 | Lógica DLB | 1s (actúa solo con muestra nueva de red) | Ajuste de amperaje de 1A por muestra, en ambos sentidos. |
 | Telegram | 2s | Polling de mensajes entrantes. |
-| Pantalla | 500ms | Refresco de la interfaz visual. |
+| LED de estado | 200ms | Color según el estado. |
 | Google Sheets | 10s (check) / 1h (envío) | Envío de datos cada hora en punto. |
 | Diagnóstico (Sheets) | 1 min (muestra) / 5 min (envío) | Muestras y eventos por lotes. |
 | Precios ESIOS | 1h, y al cambiar de día | Precios PVPC del día. Tras un fallo, reintento cada minuto. |
@@ -371,8 +357,8 @@ Registro detallado para analizar durante unos días el funcionamiento de todo el
 
 | Pestaña | Contenido |
 |---------|-----------|
-| **Muestras** | Una fila por minuto: red (actual, mínimo y máximo del minuto, para ver los picos), solar, precio, modo, Beny (W, estado, amperios objetivo y reales), termo (estado, W, relé), depuradora (estado, W, relé, horas de hoy, sobrante medio) y salud del M5Dial (heap libre, RSSI WiFi, minutos encendido). |
-| **Eventos** | Arranques (con la causa del reinicio: `panic`, `task_wdt`, `brownout`…), cambios de estado del Beny, decisiones y órdenes del termo y la depuradora, resumen diario de la depuradora, conexiones y desconexiones de los relés y del Huawei, reconexiones WiFi, cambios de modo con el dial y todos los comandos de Telegram. |
+| **Muestras** | Una fila por minuto: red (actual, mínimo y máximo del minuto, para ver los picos), solar, precio, modo, Beny (W, estado, amperios objetivo y reales), termo (estado, W, relé), depuradora (estado, W, relé, horas de hoy, sobrante medio) y salud del StampS3 (heap libre, RSSI WiFi, minutos encendido). |
+| **Eventos** | Arranques (con la causa del reinicio: `panic`, `task_wdt`, `brownout`…), cambios de estado del Beny, decisiones y órdenes del termo y la depuradora, resumen diario de la depuradora, conexiones y desconexiones de los relés y del Huawei, reconexiones WiFi, cambios de modo con el botón y todos los comandos de Telegram. |
 
 - Las pestañas se crean solas, con cabecera, en el primer envío.
 - Se envía **por lotes cada 5 min** con un `POST` JSON: una petición TLS por lote en vez de una por minuto, porque cada una para el bucle un par de segundos.
@@ -386,9 +372,9 @@ Registro detallado para analizar durante unos días el funcionamiento de todo el
 
 > Los datos dejan ver, por ejemplo, cuándo hay gente en casa: la URL del script y la clave no deben publicarse.
 
-### Vigilante (aviso si el M5Dial deja de dar señales)
+### Vigilante (aviso si el StampS3 deja de dar señales)
 
-El script apunta la hora de cada lote recibido (también los vacíos). Un temporizador de Google ejecuta `checkWatchdog` cada 5 min: si llevan **más de 20 min sin llegar datos**, manda un Telegram ("⚠️ El M5Dial no envía datos desde las …"), y otro cuando vuelven. Con `/diag_off` el M5Dial sigue mandando cada 5 min un lote vacío como señal de vida, para que el vigilante no dé falsas alarmas.
+El script apunta la hora de cada lote recibido (también los vacíos). Un temporizador de Google ejecuta `checkWatchdog` cada 5 min: si llevan **más de 20 min sin llegar datos**, manda un Telegram ("⚠️ El StampS3 no envía datos desde las …"), y otro cuando vuelven. Con `/diag_off` el StampS3 sigue mandando cada 5 min un lote vacío como señal de vida, para que el vigilante no dé falsas alarmas.
 
 Configuración, una sola vez, en el editor de Apps Script:
 
@@ -401,15 +387,15 @@ En la hoja de cálculo, *Extensiones → Apps Script* (o desde [script.google.co
 
 ## Hardware Necesario
 
-- **M5Stack Dial V1.1** (StampS3A: ESP32-S3FN8, 8 MB de flash, sin PSRAM; pantalla redonda táctil 240×240, encoder rotativo con pulsador)
+- **M5Stack StampS3** (ESP32-S3FN8, 8 MB de flash, sin PSRAM; LED RGB en G21 y botón en G0). Sin reloj con pila: la hora sale de NTP al arrancar.
 - **Cargador Beny** con interfaz de red UDP (puerto 3333)
 - **Inversor Solar Huawei** con Smart Meter Modbus TCP (puerto 502)
 - **Relé Tongou TO-Q-SY1-JWT** (Tuya WiFi, carril DIN, con medición) delante del termo eléctrico
 - Otro **Tongou TO-Q-SY1-JWT** delante de la depuradora y el clorador de la piscina
 - **Red WiFi** con acceso a Internet (para Telegram, ESIOS, Google Sheets)
-- **Alimentación fiable para el M5Dial** (cargador de calidad, 5 V / 2 A): los apagones del M5Dial dejan el coche sin control (los relés se protegen solos con su seguro)
+- **Alimentación fiable para el StampS3** (cargador de calidad, 5 V / 2 A): los apagones del StampS3 dejan el coche sin control (los relés se protegen solos con su seguro)
 
-> ⚠️ **El inversor Huawei solo admite un cliente Modbus TCP a la vez.** Si hay otro equipo conectado (por ejemplo el M5StickC antiguo, Home Assistant…), el M5Dial conecta y el inversor corta la conexión al instante: en el log aparece `Connected successfully!` → `Lost Connection` y errores `0xE4`, y red y solar se quedan a 0.
+> ⚠️ **El inversor Huawei solo admite un cliente Modbus TCP a la vez.** Si hay otro equipo conectado (por ejemplo el M5StickC antiguo, Home Assistant…), el StampS3 conecta y el inversor corta la conexión al instante: en el log aparece `Connected successfully!` → `Lost Connection` y errores `0xE4`, y red y solar se quedan a 0.
 
 ## Configuración Inicial
 
@@ -426,9 +412,11 @@ En la hoja de cálculo, *Extensiones → Apps Script* (o desde [script.google.co
 
 2. **Compilar y cargar** con PlatformIO (por USB — no hay actualización OTA):
    ```bash
-   pio run -e m5dial -t upload
+   pio run -e stamps3 -t upload
    ```
-   El Dial se programa por el USB nativo del ESP32-S3 (aparece como *Dispositivo serie USB*). Si no aparece ningún puerto — típicamente la primera vez, con el firmware de fábrica —, mantén pulsado el botón **G0** del StampS3 mientras conectas el cable para entrar en modo descarga.
+   El StampS3 se programa por el USB nativo del ESP32-S3 (aparece como *Dispositivo serie USB*). Si no aparece ningún puerto — típicamente la primera vez, con el firmware de fábrica —, mantén pulsado su botón (**G0**) mientras conectas el cable para entrar en modo descarga.
+
+   > Abrir el puerto serie (monitor) puede **reiniciar** el StampS3 por las líneas DTR/RTS del USB; en el log aparece como reinicio `desconocido`. Sin el PC conectado no pasa.
 
 3. **Monitorizar** la salida serie:
    ```bash
@@ -456,7 +444,7 @@ Las claves `t_pause`, `t_resume` y `r_margin` de la pausa automática ya no se l
 
 ## Particiones de Flash (sin OTA)
 
-El proyecto **no incluye actualización OTA**: se carga siempre por USB. La placa `m5stack-stamps3` usa `default_8MB.csv` (dos ranuras de aplicación de 3,3 MB), así que no hace falta un esquema propio: el firmware ocupa en torno al **35 %** de una ranura, con margen holgado para crecer.
+El proyecto **no incluye actualización OTA**: se carga siempre por USB. La placa `m5stack-stamps3` usa `default_8MB.csv` (dos ranuras de aplicación de 3,3 MB), así que no hace falta un esquema propio: el firmware ocupa en torno al **29 %** de una ranura, con margen holgado para crecer.
 
 `platformio.ini` activa además `-DARDUINO_USB_CDC_ON_BOOT=1`; sin esa opción, `Serial` no sale por el USB nativo del ESP32-S3 y el monitor serie queda mudo.
 

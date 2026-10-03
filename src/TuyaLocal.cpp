@@ -387,7 +387,7 @@ void TuyaLocal::keepFailsafe(uint32_t secs) {
   snprintf(dps, sizeof(dps), "\"9\":%u", secs);
   if (!sendDps(dps)) return;
   if (changed) {
-    if (secs) logEventf("TUYA", "%s: seguro activado (%u min sin el M5Dial -> cambia solo)", _name,
+    if (secs) logEventf("TUYA", "%s: seguro activado (%u min sin el controlador -> cambia solo)", _name,
                         secs / 60);
     else if (_fsSecs != UINT32_MAX) logEventf("TUYA", "%s: seguro desactivado", _name);
   }

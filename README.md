@@ -119,6 +119,10 @@ El termo tiene su propio termostato mecánico. Delante lleva un relé de carril 
 
 Para saber si el termo cabe se usa su **potencia real**, que el relé mide cada vez que calienta (hasta la primera medida se toman `TERMO_DEFAULT_POWER` = 2600 W; el termo mide 2,55-2,58 kW). La cuenta es: red actual − lo que el coche aún podría ceder hasta 6A − lo que consume ahora el termo + potencia del termo ≤ contratada − 200 W. No se actúa sobre una lectura de red de más de 30 s.
 
+### Ciclos de calentamiento
+
+Cada vez que el termo calienta queda en Eventos (`TERMO`), para analizar a qué horas funciona: `Empieza a calentar (2550 W, precio …, red …)` y, al terminar, `Deja de calentar: 48 min, 2.10 kWh, precio medio 0.205 E/kWh, 0.43 EUR`. Empieza por encima de 500 W y termina por debajo de 100 W (histéresis contra el ruido de la medida); la energía y el coste se suman cada segundo con el precio de cada momento, así que un ciclo que cruza un cambio de hora sale con su precio medio real.
+
 ### Modos
 
 | Modo | Precio | Sobrecarga |

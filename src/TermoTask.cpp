@@ -67,6 +67,53 @@ void setTermoMaxPrice(float price) {
 
 void loopTermo() { relay.loop(); }
 
+// Heating cycles, as events for the analysis of when the heater runs: start
+// above CYCLE_ON_W, end below CYCLE_OFF_W (hysteresis against noise in the
+// reading). Energy and cost are integrated every call (1 s), with the price
+// of each moment, so a cycle across an hour change gets its real average.
+static const float CYCLE_ON_W = 500;
+static const float CYCLE_OFF_W = 100;
+
+static void trackHeatingCycle() {
+  static bool heating = false;
+  static unsigned long startedAt = 0, lastTick = 0;
+  static double wh = 0, cost = 0, pricedWh = 0;
+
+  unsigned long now = millis();
+  float dt = lastTick ? (now - lastTick) / 1000.0 : 0;
+  lastTick = now;
+  float w = relay.switchOn ? relay.power : 0;
+
+  if (!heating && w > CYCLE_ON_W) {
+    heating = true;
+    startedAt = now;
+    wh = cost = pricedWh = 0;
+    logEventf("TERMO", "Empieza a calentar (%.0f W, precio %.3f E/kWh, red %d W)", w,
+              getCurrentPrice(), current_grid_power);
+    return;
+  }
+  if (!heating) return;
+
+  double stepWh = w * dt / 3600.0;
+  wh += stepWh;
+  float price = getCurrentPrice();
+  if (price >= 0) {
+    cost += stepWh / 1000.0 * price;
+    pricedWh += stepWh;
+  }
+
+  if (w < CYCLE_OFF_W) {
+    heating = false;
+    float mins = (now - startedAt) / 60000.0;
+    if (pricedWh > 0) {
+      logEventf("TERMO", "Deja de calentar: %.0f min, %.2f kWh, precio medio %.3f E/kWh, %.2f EUR",
+                mins, wh / 1000.0, cost * 1000.0 / pricedWh, cost);
+    } else {
+      logEventf("TERMO", "Deja de calentar: %.0f min, %.2f kWh (sin precio)", mins, wh / 1000.0);
+    }
+  }
+}
+
 // Overload the system can no longer fix: car already at its floor (or not
 // charging) and the heater not drawing. Nothing left to cut from here, so the
 // user is told to switch something off before the distributor cuts. Works on
@@ -132,6 +179,8 @@ void runTermoLogic() {
 
   // Learn the heater's real power whenever it is heating
   if (relay.switchOn && relay.power > 500) heaterWatts = relay.power;
+
+  trackHeatingCycle();
 
   // Only act on a live grid reading
   static uint32_t lastSample = 0;

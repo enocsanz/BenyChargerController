@@ -230,12 +230,7 @@ Una unidad **M5Stack ENV III** (SHT30 de temperatura y humedad en 0x44, QMP6988 
 
 Además del PVPC (indicador ESIOS **1001**, lo que cuesta la energía de la red), se descarga cada hora el **1739**: lo que se paga por la energía vertida con la compensación simplificada del PVPC. Puede ser **negativo** en días de mucho sol y poca demanda (en dos semanas de septiembre-octubre: 8 horas, entre −0,0002 y −0,0009 €/kWh). `/status` lo muestra y el diagnóstico lo guarda en cada muestra.
 
-**Con precio de excedentes negativo, prioridad a consumir** (verter cuesta dinero y la energía de la red está prácticamente a 0):
-
-- **Coche**: en modo Solar carga como en Balanceo, hasta el límite de red (`/set_limit`).
-- **Depuradora**: arranca aunque el sobrante no llegue al umbral y no se para por falta de sol (respetando el máximo de horas del día).
-- **Termo**: nada especial; con el PVPC a ~0 ya está habilitado.
-- Aviso por Telegram y evento `EXCEDENTES` al empezar y al terminar cada periodo.
+**Solo se registra, sin ninguna acción**: los periodos con precio negativo quedan en Eventos (`EXCEDENTES`, al empezar y al terminar) y el precio en cada muestra. No cambia nada del coche, el termo ni la depuradora, ni se avisa por Telegram.
 
 **Pendiente (más adelante)**: limitar el vertido en el propio inversor Huawei cuando el precio sea claramente negativo (por ejemplo, por debajo de −0,01 €/kWh). Por ahora no compensa: los negativos han sido de céntimos y escribir en la configuración del inversor tiene riesgos (quedarse limitado si algo falla). Se haría leyendo antes los registros y volviendo siempre a vertido libre ante cualquier fallo.
 

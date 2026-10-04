@@ -127,7 +127,7 @@ void handleNewMessages(int numNewMessages) {
       float sp = getCurrentSurplusPrice();
       msg += "☀️ Compensacion excedentes: " +
              (isnan(sp) ? String("sin dato") : String(sp, 4) + " E/kWh") +
-             (surplusPriceNegative() ? " (NEGATIVO: prioridad a consumir)" : "") + "\n\n";
+             (surplusPriceNegative() ? " (NEGATIVO)" : "") + "\n\n";
 
       msg += "🏠 Red (Grid): " + String(current_grid_power > 0 ? "+" : "") + String((float)current_grid_power, 0) +
              " W / " + String(max_grid_power) + " W\n";

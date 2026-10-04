@@ -274,7 +274,11 @@ void runSmartChargingLogic() {
   }
   lastSample = grid_sample_count;
 
-  int32_t limit_watts = (charging_mode == 0) ? SOLAR_GRID_TARGET : max_grid_power;
+  // Exported energy priced below zero: Solar mode charges like Balanceo (up to
+  // the grid limit) to use the sun at home instead of paying to export it; in
+  // those hours the grid energy is also nearly free.
+  bool solarOnly = (charging_mode == 0) && !surplusPriceNegative();
+  int32_t limit_watts = solarOnly ? SOLAR_GRID_TARGET : max_grid_power;
   int32_t error_watts = limit_watts - current_grid_power; // > 0: room left
   int ideal_amps = target_amps;
 
@@ -440,6 +444,23 @@ void loop() {
   if (wifiUp && (millis() - lastLogicRun > logicInterval || manual_logic_trigger)) {
     lastLogicRun = millis();
     manual_logic_trigger = false;
+    // Start/end of a negative surplus price period: event + Telegram
+    static bool wasNegative = false;
+    bool negative = surplusPriceNegative();
+    if (negative != wasNegative) {
+      wasNegative = negative;
+      float sp = getCurrentSurplusPrice();
+      if (negative) {
+        logEventf("EXCEDENTES", "Precio negativo (%.4f E/kWh): prioridad a consumir", sp);
+        sendTelegramNotification("☀️ Precio de excedentes negativo (" + String(sp, 4) +
+                                 " E/kWh): verter cuesta dinero. Coche al limite de red "
+                                 "aunque este en Solar y depuradora encendida.");
+      } else {
+        logEventf("EXCEDENTES", "Precio vuelve a positivo (%.4f E/kWh)", sp);
+        sendTelegramNotification("☀️ Precio de excedentes otra vez positivo (" + String(sp, 4) +
+                                 " E/kWh): control normal.");
+      }
+    }
     runSmartChargingLogic();
     runTermoLogic();
     runPiscinaLogic();

@@ -226,6 +226,19 @@ Una unidad **M5Stack ENV III** (SHT30 de temperatura y humedad en 0x44, QMP6988 
 - Cada medida trae un CRC-8 que se comprueba: con un contacto flojo llegó a leer −45,0 °C y 100 % (todo ceros y todo unos), y ahora esas lecturas se descartan.
 - **`/i2c`** diagnostica el bus: nivel en reposo de SDA y SCL (deben ser 1), direcciones que responden (deben ser 0x44 y 0x70; si responden todas, hay una línea bloqueada) y el código de la orden de medida.
 
+## Precio de los Excedentes
+
+Además del PVPC (indicador ESIOS **1001**, lo que cuesta la energía de la red), se descarga cada hora el **1739**: lo que se paga por la energía vertida con la compensación simplificada del PVPC. Puede ser **negativo** en días de mucho sol y poca demanda (en dos semanas de septiembre-octubre: 8 horas, entre −0,0002 y −0,0009 €/kWh). `/status` lo muestra y el diagnóstico lo guarda en cada muestra.
+
+**Con precio de excedentes negativo, prioridad a consumir** (verter cuesta dinero y la energía de la red está prácticamente a 0):
+
+- **Coche**: en modo Solar carga como en Balanceo, hasta el límite de red (`/set_limit`).
+- **Depuradora**: arranca aunque el sobrante no llegue al umbral y no se para por falta de sol (respetando el máximo de horas del día).
+- **Termo**: nada especial; con el PVPC a ~0 ya está habilitado.
+- Aviso por Telegram y evento `EXCEDENTES` al empezar y al terminar cada periodo.
+
+**Pendiente (más adelante)**: limitar el vertido en el propio inversor Huawei cuando el precio sea claramente negativo (por ejemplo, por debajo de −0,01 €/kWh). Por ahora no compensa: los negativos han sido de céntimos y escribir en la configuración del inversor tiene riesgos (quedarse limitado si algo falla). Se haría leyendo antes los registros y volviendo siempre a vertido libre ante cualquier fallo.
+
 ## Reconexión WiFi
 
 `WiFi.setAutoReconnect(true)` por sí solo no siempre recupera al ESP32 cuando el punto de acceso desaparece un rato, así que la reconexión es **escalonada y no bloqueante**:

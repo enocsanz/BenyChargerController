@@ -21,7 +21,7 @@ var SAMPLE_HEADERS = [
   'Fecha', 'Hora', 'Red W', 'Red min W', 'Red max W', 'Solar W', 'Precio E/kWh',
   'Modo (0 Solar, 1 Balanceo)', 'Beny W', 'Beny estado', 'Amps objetivo', 'Amps reales',
   'Termo estado', 'Termo W', 'Termo rele', 'Piscina estado', 'Piscina W', 'Piscina rele',
-  'Piscina h hoy', 'Sobrante medio W', 'Heap libre', 'WiFi RSSI', 'Uptime min', 'Temp chip C', 'Caseta C', 'Caseta %HR'
+  'Piscina h hoy', 'Sobrante medio W', 'Heap libre', 'WiFi RSSI', 'Uptime min', 'Temp chip C', 'Caseta C', 'Caseta %HR', 'Precio excedentes E/kWh'
 ];
 var EVENT_HEADERS = ['Fecha', 'Hora', 'Tipo', 'Detalle'];
 

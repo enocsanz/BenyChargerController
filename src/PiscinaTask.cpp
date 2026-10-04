@@ -217,14 +217,16 @@ void runPiscinaLogic() {
     // Not with less than MIN_LEFT of today's maximum left: it would only run
     // a couple of minutes (seen: started with 2 min left, stopped at 2.5 min)
     if (haveAvg && gridFresh && runSecs + MIN_LEFT < maxSecs &&
-        surplusAvg >= pumpWatts + START_MARGIN &&
+        (surplusAvg >= pumpWatts + START_MARGIN || surplusPriceNegative()) &&
         (!relay.switchOn ? inState >= MIN_OFF : true)) {
       solarRun = true;
       logEventf("PISCINA", "Arranque con sol (excedente medio %.0f W)", surplusAvg);
     }
   } else {
     bool maxReached = runSecs >= maxSecs;
-    bool noSun = inState >= MIN_ON && surplusAvg < pumpWatts * STOP_FRACTION;
+    // With a negative surplus price exporting costs money: keep running
+    bool noSun = inState >= MIN_ON && surplusAvg < pumpWatts * STOP_FRACTION &&
+                 !surplusPriceNegative();
     if (maxReached || noSun) {
       solarRun = false;
       logEventf("PISCINA", "Parada (%s, excedente medio %.0f W, hoy %.1f h)",

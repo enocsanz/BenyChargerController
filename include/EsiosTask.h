@@ -24,7 +24,14 @@ struct PriceState {
   }
 };
 
-extern PriceState esios_prices;
+extern PriceState esios_prices;  // PVPC: what grid energy costs
+extern PriceState esios_surplus; // what exported energy is paid (simplified compensation)
+
+// Price paid for exported energy this hour (EUR/kWh), NAN if unknown. It can
+// be negative: then exporting costs money, and the controller prefers to use
+// the solar energy at home (car at full current, pool pump on).
+float getCurrentSurplusPrice();
+bool surplusPriceNegative();
 
 void setupEsios();
 void loopEsios();

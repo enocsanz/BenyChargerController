@@ -127,6 +127,8 @@ static void takeSample() {
   float ct = envTemp(), ch = envHumidity();
   s += "," + (isnan(ct) ? String("null") : String(ct, 1));
   s += "," + (isnan(ch) ? String("null") : String(ch, 0));
+  float sp = getCurrentSurplusPrice();
+  s += "," + (isnan(sp) ? String("null") : String(sp, 4));
   s += "]";
 
   if (sampleCount == MAX_SAMPLES) {

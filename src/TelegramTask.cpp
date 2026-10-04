@@ -4,6 +4,7 @@
 #include "PiscinaTask.h"
 #include "SondaLink.h"
 #include "EnvSensor.h"
+#include "EsiosTask.h"
 #include "TermoTask.h"
 
 // #include "WeatherTask.h" REMOVED
@@ -122,7 +123,11 @@ void handleNewMessages(int numNewMessages) {
     } else if (textLower == "/status") {
       String msg = "📊 ESTADO DEL SISTEMA \n\n";
 
-      msg += "💰 Precio Luz (PVPC): " + String(getCurrentPrice(), 3) + " E/kWh\n\n";
+      msg += "💰 Precio Luz (PVPC): " + String(getCurrentPrice(), 3) + " E/kWh\n";
+      float sp = getCurrentSurplusPrice();
+      msg += "☀️ Compensacion excedentes: " +
+             (isnan(sp) ? String("sin dato") : String(sp, 4) + " E/kWh") +
+             (surplusPriceNegative() ? " (NEGATIVO: prioridad a consumir)" : "") + "\n\n";
 
       msg += "🏠 Red (Grid): " + String(current_grid_power > 0 ? "+" : "") + String((float)current_grid_power, 0) +
              " W / " + String(max_grid_power) + " W\n";

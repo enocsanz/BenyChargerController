@@ -21,7 +21,7 @@ var SAMPLE_HEADERS = [
   'Fecha', 'Hora', 'Red W', 'Red min W', 'Red max W', 'Solar W', 'Precio E/kWh',
   'Modo (0 Solar, 1 Balanceo)', 'Beny W', 'Beny estado', 'Amps objetivo', 'Amps reales',
   'Termo estado', 'Termo W', 'Termo rele', 'Piscina estado', 'Piscina W', 'Piscina rele',
-  'Piscina h hoy', 'Sobrante medio W', 'Heap libre', 'WiFi RSSI', 'Uptime min', 'Temp chip C'
+  'Piscina h hoy', 'Sobrante medio W', 'Heap libre', 'WiFi RSSI', 'Uptime min', 'Temp chip C', 'Caseta C', 'Caseta %HR'
 ];
 var EVENT_HEADERS = ['Fecha', 'Hora', 'Tipo', 'Detalle'];
 
@@ -75,6 +75,14 @@ function sheetFor(ss, name, headers) {
     sheet.appendRow(headers);
     sheet.setFrozenRows(1);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+  } else {
+    // Columns added in later firmware versions: complete the header row
+    var current = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+    for (var i = 0; i < headers.length; i++) {
+      if (current[i] === '' || current[i] === null) {
+        sheet.getRange(1, i + 1).setValue(headers[i]).setFontWeight('bold');
+      }
+    }
   }
   return sheet;
 }

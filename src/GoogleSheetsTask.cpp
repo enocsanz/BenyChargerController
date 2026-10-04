@@ -4,6 +4,7 @@
 #include "HuaweiTask.h"
 #include "PiscinaTask.h"
 #include "TermoTask.h"
+#include "EnvSensor.h"
 #include "config.h"
 #include <Arduino.h>
 #include <HTTPClient.h>
@@ -121,6 +122,11 @@ static void takeSample() {
        String(millis() / 60000);
   // Chip temperature, to keep an eye on it once the board is enclosed
   s += "," + String(temperatureRead(), 1);
+  // Pool house (ENV III): empty cell (JSON null) without a valid reading, so
+  // the sheet also shows how often the sensor fails
+  float ct = envTemp(), ch = envHumidity();
+  s += "," + (isnan(ct) ? String("null") : String(ct, 1));
+  s += "," + (isnan(ch) ? String("null") : String(ch, 0));
   s += "]";
 
   if (sampleCount == MAX_SAMPLES) {

@@ -392,7 +392,7 @@ Registro detallado para analizar durante unos días el funcionamiento de todo el
 
 | Pestaña | Contenido |
 |---------|-----------|
-| **Muestras** | Una fila por minuto: red (actual, mínimo y máximo del minuto, para ver los picos), solar, precio, modo, Beny (W, estado, amperios objetivo y reales), termo (estado, W, relé), depuradora (estado, W, relé, horas de hoy, sobrante medio) y salud del StampS3 (heap libre, RSSI WiFi, minutos encendido, temperatura del chip). |
+| **Muestras** | Una fila por minuto: red (actual, mínimo y máximo del minuto, para ver los picos), solar, precio, modo, Beny (W, estado, amperios objetivo y reales), termo (estado, W, relé), depuradora (estado, W, relé, horas de hoy, sobrante medio) y salud del StampS3 (heap libre, RSSI WiFi, minutos encendido, temperatura del chip) y temperatura y humedad de la caseta (vacías si el sensor no da una lectura válida). |
 | **Eventos** | Arranques (con la causa del reinicio: `panic`, `task_wdt`, `brownout`…), cambios de estado del Beny, decisiones y órdenes del termo y la depuradora, resumen diario de la depuradora, conexiones y desconexiones de los relés y del Huawei, reconexiones WiFi, cambios de modo con el botón y todos los comandos de Telegram. |
 
 - Las pestañas se crean solas, con cabecera, en el primer envío.

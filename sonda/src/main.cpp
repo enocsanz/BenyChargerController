@@ -14,6 +14,7 @@
 #include <M5StickCPlus.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <esp_task_wdt.h>
 
 // Main controller (StampS3), fixed IP in the router
 static const IPAddress MAIN_IP(192, 168, 86, 41);
@@ -24,6 +25,17 @@ static uint32_t seq = 0, sent = 0, acked = 0;
 static uint32_t minSent = 0, minAcked = 0;
 static float lastMinutePct = -1;
 static bool otaReady = false;
+static unsigned long lastAckAt = 0; // last echo from the controller
+
+// Self-healing. On 03/10 at 22:53 the probe lost the WiFi (-88 dBm) and sent
+// nothing for 21 h, although it answered pings once the WiFi came back: the
+// automatic reconnection alone is not enough, and the UDP socket can be left
+// useless across a reconnection. Escalating recovery, plus a watchdog:
+static const unsigned long REJOIN_AFTER = 30000;     // no WiFi: full re-join
+static const unsigned long REBOOT_NO_WIFI = 600000;  // no WiFi 10 min: restart
+static const unsigned long UDP_RESET_AFTER = 120000; // connected, no echo 2 min: reopen UDP
+static const unsigned long REBOOT_NO_ECHO = 600000;  // no echo 10 min: restart
+static const int WDT_SECS = 30;
 
 // Echoes are counted whenever they arrive, not only within a short wait: the
 // controller answers from its main loop, which can be busy for a second or
@@ -59,6 +71,7 @@ static void readEchoes() {
     if (slot != r.seq) { // first echo of this message
       slot = r.seq;
       acked++;
+      lastAckAt = millis();
     }
   }
 }
@@ -123,10 +136,64 @@ void setup() {
 
   draw();
   udp.begin(SONDA_UDP_PORT);
+  lastAckAt = millis();
+
+  esp_task_wdt_init(WDT_SECS, true);
+  esp_task_wdt_add(NULL);
+}
+
+static void restart(const char *why) {
+  Serial.printf("Reinicio: %s\n", why);
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setCursor(0, 0);
+  M5.Lcd.printf("Reinicio:\n%s", why);
+  delay(1000);
+  ESP.restart();
+}
+
+// Escalating recovery of the WiFi and of the UDP link
+static void heal() {
+  static bool wasConnected = false;
+  static unsigned long downSince = 0, lastRejoin = 0, lastUdpReset = 0;
+  bool connected = WiFi.status() == WL_CONNECTED;
+
+  if (!connected) {
+    if (downSince == 0) downSince = lastRejoin = millis();
+    if (millis() - lastRejoin > REJOIN_AFTER) {
+      lastRejoin = millis();
+      Serial.println("WiFi: reconexion completa");
+      WiFi.disconnect();
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD); // any point, strongest first (no BSSID)
+    }
+    if (millis() - downSince > REBOOT_NO_WIFI) restart("10 min sin WiFi");
+    wasConnected = false;
+    return;
+  }
+  downSince = 0;
+
+  if (!wasConnected) { // just (re)connected: fresh UDP socket
+    wasConnected = true;
+    udp.stop();
+    udp.begin(SONDA_UDP_PORT);
+    lastAckAt = lastUdpReset = millis();
+    Serial.println("WiFi conectada: UDP reabierto");
+    return;
+  }
+
+  unsigned long silent = millis() - lastAckAt;
+  if (silent > UDP_RESET_AFTER && millis() - lastUdpReset > UDP_RESET_AFTER) {
+    lastUdpReset = millis();
+    Serial.println("Sin confirmaciones: UDP reabierto");
+    udp.stop();
+    udp.begin(SONDA_UDP_PORT);
+  }
+  if (silent > REBOOT_NO_ECHO) restart("10 min sin respuesta");
 }
 
 void loop() {
   static unsigned long lastSend = 0, lastMinute = 0, lastDraw = 0;
+  esp_task_wdt_reset();
+  heal();
 
   if (WiFi.status() == WL_CONNECTED) {
     if (!otaReady) setupOta();

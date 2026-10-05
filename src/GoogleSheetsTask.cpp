@@ -5,6 +5,7 @@
 #include "PiscinaTask.h"
 #include "TermoTask.h"
 #include "EnvSensor.h"
+#include "SondaLink.h"
 #include "config.h"
 #include <Arduino.h>
 #include <HTTPClient.h>
@@ -129,6 +130,9 @@ static void takeSample() {
   s += "," + (isnan(ch) ? String("null") : String(ch, 0));
   float sp = getCurrentSurplusPrice();
   s += "," + (isnan(sp) ? String("null") : String(sp, 4));
+  // Water in the heater (DS18B20 on the probe), empty without a fresh reading
+  float wt = sondaWaterTemp();
+  s += "," + (isnan(wt) ? String("null") : String(wt, 1));
   s += "]";
 
   if (sampleCount == MAX_SAMPLES) {

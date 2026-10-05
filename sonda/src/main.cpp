@@ -15,6 +15,8 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <esp_task_wdt.h>
+#include <DallasTemperature.h>
+#include <OneWire.h>
 
 // Main controller (StampS3), fixed IP in the router
 static const IPAddress MAIN_IP(192, 168, 86, 41);
@@ -25,6 +27,46 @@ static uint32_t seq = 0, sent = 0, acked = 0;
 static uint32_t minSent = 0, minAcked = 0;
 static float lastMinutePct = -1;
 static bool otaReady = false;
+
+// Water temperature: DS18B20 on G26 (top header). It needs a 4.7k pull-up
+// between data and 3.3V (most modules carry it); the pin's internal pull-up
+// is enabled as well, though it is too weak to rely on alone.
+static const int ONEWIRE_PIN = 26;
+static const unsigned long TEMP_INTERVAL = 10000; // a reading every 10 s
+static OneWire oneWire(ONEWIRE_PIN);
+static DallasTemperature ds(&oneWire);
+static float waterTemp = NAN;      // last valid reading
+static unsigned long waterAt = 0;  // when it was taken
+static int sensors = 0;
+
+// Non-blocking: request a conversion, collect it on the next call (~750 ms
+// later at 12 bits). -127 means no sensor answers; 85.0 is the power-on value
+// before the first conversion: neither is a reading.
+static void readWater() {
+  static bool requested = false;
+  static unsigned long requestedAt = 0;
+  if (!requested) {
+    if (waterAt && millis() - requestedAt < TEMP_INTERVAL) return;
+    sensors = ds.getDeviceCount();
+    if (sensors == 0) {
+      ds.begin(); // look for it again (a loose contact, hot-plugging)
+      sensors = ds.getDeviceCount();
+    }
+    ds.requestTemperatures();
+    requested = true;
+    requestedAt = millis();
+    return;
+  }
+  if (millis() - requestedAt < 800) return;
+  requested = false;
+  float t = ds.getTempCByIndex(0);
+  if (t != DEVICE_DISCONNECTED_C && t != 85.0 && t > -20 && t < 110) {
+    waterTemp = t;
+    waterAt = millis();
+  } else if (waterAt && millis() - waterAt > 60000) {
+    waterTemp = NAN; // no valid reading for a minute: do not send a stale one
+  }
+}
 static unsigned long lastAckAt = 0; // last echo from the controller
 
 // Self-healing. On 03/10 at 22:53 the probe lost the WiFi (-88 dBm) and sent
@@ -50,7 +92,7 @@ static void sendOne() {
   p.magic = SONDA_MAGIC;
   p.seq = ++seq;
   p.uptime = millis() / 1000;
-  p.temp = NAN; // no sensor yet
+  p.temp = waterTemp; // NAN without a valid reading
   p.rssi = (int8_t)WiFi.RSSI();
   strncpy(p.fw, __DATE__ " " __TIME__, sizeof(p.fw));
   udp.beginPacket(MAIN_IP, SONDA_UDP_PORT);
@@ -99,6 +141,17 @@ static void draw() {
     M5.Lcd.println("SIN WIFI");
     return;
   }
+  // Water temperature, big
+  M5.Lcd.setTextSize(4);
+  if (isnan(waterTemp)) {
+    M5.Lcd.setTextColor(RED, BLACK);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.println(sensors ? "Sonda sin dato" : "Sin sonda");
+  } else {
+    M5.Lcd.setTextColor(CYAN, BLACK);
+    M5.Lcd.printf("%.1f C\n", waterTemp);
+  }
+  M5.Lcd.setTextSize(2);
   // WiFi signal: green >= -67, yellow >= -75, red below
   long rssi = WiFi.RSSI();
   M5.Lcd.setTextColor(rssi >= -67 ? GREEN : rssi >= -75 ? YELLOW : RED, BLACK);
@@ -107,14 +160,11 @@ static void draw() {
   if (lastMinutePct >= 0) {
     uint16_t c = lastMinutePct >= 80 ? GREEN : lastMinutePct >= 50 ? YELLOW : RED;
     M5.Lcd.setTextColor(c, BLACK);
-    M5.Lcd.setTextSize(3);
-    M5.Lcd.printf("%3.0f%%\n", lastMinutePct);
-    M5.Lcd.setTextSize(2);
+    M5.Lcd.printf("Enlace %.0f%%\n", lastMinutePct);
     M5.Lcd.setTextColor(WHITE, BLACK);
   } else {
-    M5.Lcd.println("midiendo...");
+    M5.Lcd.println("Enlace: midiendo");
   }
-  M5.Lcd.printf("Total %.0f%% %u\n", sent ? 100.0 * acked / sent : 0, sent);
   M5.Lcd.setTextSize(1);
   M5.Lcd.printf("%s %s\n", WiFi.localIP().toString().c_str(), WiFi.BSSIDstr().c_str());
 }
@@ -133,6 +183,11 @@ void setup() {
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  ds.begin();
+  ds.setWaitForConversion(false); // readWater() collects it later
+  pinMode(ONEWIRE_PIN, INPUT_PULLUP);
+  sensors = ds.getDeviceCount();
 
   draw();
   udp.begin(SONDA_UDP_PORT);
@@ -194,6 +249,7 @@ void loop() {
   static unsigned long lastSend = 0, lastMinute = 0, lastDraw = 0;
   esp_task_wdt_reset();
   heal();
+  readWater();
 
   if (WiFi.status() == WL_CONNECTED) {
     if (!otaReady) setupOta();

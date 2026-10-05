@@ -16,6 +16,8 @@ struct __attribute__((packed)) SondaPacket {
   float temp;      // water temperature (C); NAN while there is no sensor
   int8_t rssi;     // probe's WiFi signal (dBm); 0 over ESP-NOW
   char fw[21];     // probe firmware build, __DATE__ " " __TIME__
+  uint8_t sensors; // DS18B20 found on the bus
+  float rawTemp;   // last reading as read, valid or not (-127: no answer)
 };
 
 #endif

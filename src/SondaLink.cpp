@@ -19,6 +19,8 @@ static volatile uint32_t probeUptime = 0;
 static volatile bool lastViaUdp = false;
 static volatile int8_t probeRssi = 0;
 static char probeFw[22] = "";
+static volatile uint8_t probeSensors = 0;
+static volatile float probeRawTemp = NAN;
 static IPAddress probeIp;
 // A reading older than this is not used (nor shown as current)
 static const unsigned long SONDA_STALE = 300000; // 5 min
@@ -48,6 +50,8 @@ static bool handlePacket(const uint8_t *data, int len, bool viaUdp) {
   lastViaUdp = viaUdp;
   probeRssi = p.rssi;
   memcpy(probeFw, p.fw, sizeof(p.fw));
+  probeSensors = p.sensors;
+  probeRawTemp = p.rawTemp;
   probeFw[sizeof(p.fw)] = 0;
   return true;
 }
@@ -161,5 +165,15 @@ String sondaLinkText() {
   }
   msg += "   Sonda encendida " + String(probeUptime / 60) + " min";
   if (!isnan(lastTemp)) msg += " | Agua " + String(lastTemp, 1) + " C";
+  // DS18B20 on the probe: how many it finds and what it last read
+  msg += "\n   DS18B20: " + String(probeSensors) + " encontrada" + (probeSensors == 1 ? "" : "s");
+  if (probeSensors == 0) {
+    msg += " (revisa datos a G26, 3,3 V y GND)";
+  } else if (!isnan(probeRawTemp)) {
+    float r = probeRawTemp;
+    msg += ", ultima lectura " + String(r, 1) + " C";
+    if (r <= -100) msg += " (no responde: falta la resistencia de 4,7k?)";
+    else if (r == 85.0) msg += " (valor de arranque, aun sin medida)";
+  }
   return msg;
 }

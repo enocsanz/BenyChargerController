@@ -38,6 +38,7 @@ static DallasTemperature ds(&oneWire);
 static float waterTemp = NAN;      // last valid reading
 static unsigned long waterAt = 0;  // when it was taken
 static int sensors = 0;
+static float rawTemp = NAN; // last reading as read, for the controller's /sonda
 
 // Non-blocking: request a conversion, collect it on the next call (~750 ms
 // later at 12 bits). -127 means no sensor answers; 85.0 is the power-on value
@@ -60,6 +61,7 @@ static void readWater() {
   if (millis() - requestedAt < 800) return;
   requested = false;
   float t = ds.getTempCByIndex(0);
+  rawTemp = t;
   if (t != DEVICE_DISCONNECTED_C && t != 85.0 && t > -20 && t < 110) {
     waterTemp = t;
     waterAt = millis();
@@ -95,6 +97,8 @@ static void sendOne() {
   p.temp = waterTemp; // NAN without a valid reading
   p.rssi = (int8_t)WiFi.RSSI();
   strncpy(p.fw, __DATE__ " " __TIME__, sizeof(p.fw));
+  p.sensors = sensors;
+  p.rawTemp = rawTemp;
   udp.beginPacket(MAIN_IP, SONDA_UDP_PORT);
   udp.write((uint8_t *)&p, sizeof(p));
   udp.endPacket();

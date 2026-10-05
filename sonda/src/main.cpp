@@ -39,6 +39,21 @@ static float waterTemp = NAN;      // last valid reading
 static unsigned long waterAt = 0;  // when it was taken
 static int sensors = 0;
 static float rawTemp = NAN; // last reading as read, for the controller's /sonda
+static uint8_t lineFlags = 0; // SONDA_LINE_* from the last check
+
+// Data line check, while no sensor is found: against the weak internal
+// pull-down, a 4.7k external pull-up still wins (reads high); with the
+// internal pull-up, the line should read high unless shorted to ground.
+static void checkLine() {
+  uint8_t f = SONDA_LINE_CHECKED;
+  pinMode(ONEWIRE_PIN, INPUT_PULLDOWN);
+  delay(2);
+  if (digitalRead(ONEWIRE_PIN)) f |= SONDA_LINE_PULLUP;
+  pinMode(ONEWIRE_PIN, INPUT_PULLUP);
+  delay(2);
+  if (!digitalRead(ONEWIRE_PIN)) f |= SONDA_LINE_GROUND;
+  lineFlags = f;
+}
 
 // Non-blocking: request a conversion, collect it on the next call (~750 ms
 // later at 12 bits). -127 means no sensor answers; 85.0 is the power-on value
@@ -50,7 +65,9 @@ static void readWater() {
     if (waterAt && millis() - requestedAt < TEMP_INTERVAL) return;
     sensors = ds.getDeviceCount();
     if (sensors == 0) {
+      checkLine();
       ds.begin(); // look for it again (a loose contact, hot-plugging)
+      pinMode(ONEWIRE_PIN, INPUT_PULLUP);
       sensors = ds.getDeviceCount();
     }
     ds.requestTemperatures();
@@ -99,6 +116,7 @@ static void sendOne() {
   strncpy(p.fw, __DATE__ " " __TIME__, sizeof(p.fw));
   p.sensors = sensors;
   p.rawTemp = rawTemp;
+  p.line = lineFlags;
   udp.beginPacket(MAIN_IP, SONDA_UDP_PORT);
   udp.write((uint8_t *)&p, sizeof(p));
   udp.endPacket();
@@ -176,7 +194,7 @@ static void draw() {
 void setup() {
   M5.begin();
   M5.Lcd.setRotation(3);
-  M5.Axp.ScreenBreath(9);
+  M5.Axp.ScreenBreath(60); // 0-100 on the Plus (9 left it almost off)
   Serial.begin(115200);
 
   // Mesh network: join the strongest point, not the first one found

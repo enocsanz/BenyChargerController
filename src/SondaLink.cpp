@@ -21,6 +21,7 @@ static volatile int8_t probeRssi = 0;
 static char probeFw[22] = "";
 static volatile uint8_t probeSensors = 0;
 static volatile float probeRawTemp = NAN;
+static volatile uint8_t probeLine = 0;
 static IPAddress probeIp;
 // A reading older than this is not used (nor shown as current)
 static const unsigned long SONDA_STALE = 300000; // 5 min
@@ -52,6 +53,7 @@ static bool handlePacket(const uint8_t *data, int len, bool viaUdp) {
   memcpy(probeFw, p.fw, sizeof(p.fw));
   probeSensors = p.sensors;
   probeRawTemp = p.rawTemp;
+  probeLine = p.line;
   probeFw[sizeof(p.fw)] = 0;
   return true;
 }
@@ -169,6 +171,14 @@ String sondaLinkText() {
   msg += "\n   DS18B20: " + String(probeSensors) + " encontrada" + (probeSensors == 1 ? "" : "s");
   if (probeSensors == 0) {
     msg += " (revisa datos a G26, 3,3 V y GND)";
+    if (probeLine & SONDA_LINE_CHECKED) {
+      if (probeLine & SONDA_LINE_GROUND)
+        msg += "\n   Linea de datos a masa: cable de datos y GND cruzados o en corto";
+      else if (probeLine & SONDA_LINE_PULLUP)
+        msg += "\n   Linea de datos: resistencia externa detectada (bien); revisa el 3,3 V";
+      else
+        msg += "\n   Linea de datos: SIN resistencia externa. Falta la de 4,7k entre datos (G26) y 3V3";
+    }
   } else if (!isnan(probeRawTemp)) {
     float r = probeRawTemp;
     msg += ", ultima lectura " + String(r, 1) + " C";

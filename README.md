@@ -119,6 +119,24 @@ El termo tiene su propio termostato mecánico. Delante lleva un relé de carril 
 
 Para saber si el termo cabe se usa su **potencia real**, que el relé mide cada vez que calienta (hasta la primera medida se toman `TERMO_DEFAULT_POWER` = 2600 W; el termo mide 2,55-2,58 kW). La cuenta es: red actual − lo que el coche aún podría ceder hasta 6A − lo que consume ahora el termo + potencia del termo ≤ contratada − 200 W. No se actúa sobre una lectura de red de más de 30 s.
 
+### Control inteligente con la sonda
+
+En modo `AUTO`, mientras la sonda del termo envía temperatura (lectura de menos de 5 min), la regla del umbral de precio se sustituye por un control que decide **cuándo** recargar. Medido durante 44 h: el termo apenas pierde calor (0,1-0,2 °C/h) y queda lleno tras cada ciclo; lo que lo encarecía era recargar justo después de cada uso, aunque fuera a 0,36 €/kWh (precio medio 0,265, solo 0,8 de 9,6 kWh por debajo de 0,18).
+
+Deja calentar si se cumple alguna de estas condiciones (si no, el relé espera a la siguiente hora barata):
+
+| Condición | Detalle |
+|---|---|
+| Precio bajo | ≤ 0,15 €/kWh |
+| Hora barata | entre las 8 horas más baratas del día |
+| Ducha de la mañana | de 00:00 a 06:30, si la sonda < 34 °C: en la hora más barata que quede hasta las 06:30, y desde las 06:00 sea cual sea el precio |
+| Mínimo de confort | sonda < 28 °C **durante 20 min seguidos**: calienta aunque sea caro, solo hasta 31 °C |
+
+- **Escala de la sonda**: va en la vaina del termostato, cerca de la boca, y marca menos que el agua de salida (que sale bastante caliente) y con retraso. En esa escala: lleno ≈ 38-39 °C; el termostato conecta ≈ 32,5 °C y desconecta ≈ 35,5 °C.
+- **Los 20 min del mínimo**: en cada ducha la sonda cae de golpe (entra agua fría por abajo) y se recupera sola varios grados al mezclarse (24,4 → 31,1 °C). Sin esa espera, cada ducha dispararía una recarga a precio de punta; con ella, en 2 días de datos solo se habría activado una vez (dos usos fuertes seguidos).
+- Sin sonda (o lectura de más de 5 min), vuelve la regla del umbral (`/set_termo_precio`). La sobrecarga, el seguro y los modos manuales no cambian.
+- `/termo` muestra la razón de la decisión ("esperando hora barata (próxima: 03h a 0.151)", "preparando la ducha de la mañana"…) y cada cambio queda en Eventos (`TERMO: Inteligente: …`).
+
 ### Ciclos de calentamiento
 
 Cada vez que el termo calienta queda en Eventos (`TERMO`), para analizar a qué horas funciona: `Empieza a calentar (2550 W, precio …, red …)` y, al terminar, `Deja de calentar: 48 min, 2.10 kWh, precio medio 0.205 E/kWh, 0.43 EUR`. Empieza por encima de 500 W y termina por debajo de 100 W (histéresis contra el ruido de la medida); la energía y el coste se suman cada segundo con el precio de cada momento, así que un ciclo que cruza un cambio de hora sale con su precio medio real.

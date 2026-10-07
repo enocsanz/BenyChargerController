@@ -67,6 +67,100 @@ void setTermoMaxPrice(float price) {
 
 void loopTermo() { relay.loop(); }
 
+// --- Smart control with the water probe (AUTO mode, fresh probe reading) ---
+// Measured over 44 h: the tank barely loses heat (0.1-0.2 C/h) and is full
+// after every cycle; what made it expensive was WHEN it recharged: right after
+// each use, even at 0.36 EUR/kWh. So after a use it waits for a cheap hour,
+// unless the water gets too low. Temperatures are on the probe's scale (it
+// sits at the mouth of the thermostat's well, below the real water
+// temperature): full ~38-39 C, the thermostat calls for heat at ~32.5 C.
+static const float SMART_CHEAP_ABS = 0.15;  // EUR/kWh: always cheap enough
+static const int SMART_CHEAP_HOURS = 8;     // the day's cheapest hours
+static const float SMART_MIN = 28.0;        // comfort floor: heat even if expensive...
+static const float SMART_MIN_STOP = 31.0;   // ...but only up to here
+// During a shower the probe dips sharply (cold water comes in at the bottom,
+// where the well is) and recovers several degrees by itself within ~20 min
+// once the tank mixes (seen: 24.4 -> 31.1 C). The floor only counts if the
+// water stays below it this long, or every shower would recharge at peak price.
+static const unsigned long SMART_MIN_HOLD = 1200000; // 20 min
+static const float SMART_MORNING = 34.0;    // tank not full before the morning shower
+static const int SMART_MORNING_END = 6;     // ...ready by 06:30 (shower ~06:45)
+static String smartNote = "";               // why, for /termo and the log
+
+// How many of today's known hours are cheaper than `hour`; -1 if unknown
+static int cheaperHours(int hour) {
+  float p = getPriceAt(hour);
+  if (p < 0) return -1;
+  int n = 0;
+  for (int h = 0; h < 24; h++) {
+    float q = getPriceAt(h);
+    if (q >= 0 && q < p) n++;
+  }
+  return n;
+}
+
+// Next hour from now (today) among the cheapest ones, for the message
+static String nextCheapHour(int from) {
+  for (int h = from + 1; h < 24; h++) {
+    int r = cheaperHours(h);
+    float p = getPriceAt(h);
+    if ((p >= 0 && p <= SMART_CHEAP_ABS) || (r >= 0 && r < SMART_CHEAP_HOURS))
+      return String(h) + "h a " + String(p, 3);
+  }
+  return "manana";
+}
+
+// True when the heater may heat now. Sets smartNote.
+static bool smartAllows(float water, float price) {
+  static bool lowWater = false;
+  static unsigned long belowSince = 0;
+  if (water < SMART_MIN) {
+    if (belowSince == 0) belowSince = millis();
+    if (millis() - belowSince >= SMART_MIN_HOLD) lowWater = true;
+  } else {
+    belowSince = 0;
+    if (water >= SMART_MIN_STOP) lowWater = false;
+  }
+  if (lowWater) {
+    smartNote = "minimo de confort (agua por debajo de " + String(SMART_MIN, 0) + " C mas de 20 min)";
+    return true;
+  }
+
+  struct tm t;
+  if (!timeNow(&t) || price < 0) {
+    smartNote = "sin hora o sin precio: no se bloquea";
+    return true;
+  }
+  int h = t.tm_hour;
+  if (price <= SMART_CHEAP_ABS) {
+    smartNote = "precio bajo (" + String(price, 3) + ")";
+    return true;
+  }
+  int rank = cheaperHours(h);
+  if (rank < 0 || rank < SMART_CHEAP_HOURS) {
+    smartNote = "entre las " + String(SMART_CHEAP_HOURS) + " horas mas baratas del dia";
+    return true;
+  }
+
+  // Morning: tank not full -> heat in the cheapest hour left before 06:30,
+  // and from 06:00 whatever the price
+  bool morning = h < SMART_MORNING_END || (h == SMART_MORNING_END && t.tm_min < 30);
+  if (morning && water < SMART_MORNING) {
+    bool cheapest = true;
+    for (int k = h + 1; k <= SMART_MORNING_END; k++) {
+      float q = getPriceAt(k);
+      if (q >= 0 && q < price) cheapest = false;
+    }
+    if (cheapest || h >= SMART_MORNING_END) {
+      smartNote = "preparando la ducha de la manana";
+      return true;
+    }
+  }
+
+  smartNote = "esperando hora barata (proxima: " + nextCheapHour(h) + ")";
+  return false;
+}
+
 // Heating cycles, as events for the analysis of when the heater runs: start
 // above CYCLE_ON_W, end below CYCLE_OFF_W (hysteresis against noise in the
 // reading). Energy and cost are integrated every call (1 s), with the price
@@ -247,7 +341,21 @@ void runTermoLogic() {
   } else if (lastPriceAt != 0 && millis() - lastPriceAt < PRICE_HOLD) {
     price = lastPrice;
   }
-  bool priceBlock = termo_mode == TERMO_AUTO && price >= 0 && price > termo_max_price;
+  // With a fresh probe reading AUTO uses the smart control; without it, the
+  // plain price threshold
+  float water = sondaWaterTemp();
+  bool priceBlock;
+  if (termo_mode == TERMO_AUTO && !isnan(water)) {
+    String before = smartNote;
+    priceBlock = !smartAllows(water, price);
+    if (smartNote.substring(0, 12) != before.substring(0, 12)) {
+      logEventf("TERMO", "Inteligente: %s (agua %.1f C, precio %.3f)", smartNote.c_str(), water,
+                price);
+    }
+  } else {
+    smartNote = "";
+    priceBlock = termo_mode == TERMO_AUTO && price >= 0 && price > termo_max_price;
+  }
   bool allowed = termo_mode != TERMO_OFF && !priceBlock;
 
   // Being allowed again (price drops, back to AUTO/ON, boot) also needs room:
@@ -325,7 +433,7 @@ String termoStatusText() {
     msg += s.power > 100 ? "calentando " + String(s.power, 0) + " W" : "encendido (termostato en reposo)";
     break;
   case TR_PRICE:
-    msg += "cortado por precio";
+    msg += smartNote.length() ? "cortado, " + smartNote : String("cortado por precio");
     break;
   case TR_OVERLOAD:
     msg += "cortado por sobrecarga, esperando margen";
@@ -334,7 +442,16 @@ String termoStatusText() {
     msg += "apagado manual";
     break;
   }
-  msg += "\n   Modo " + modeStr + " | Umbral " + String(termo_max_price, 3) + " E/kWh";
+  if (smartNote.length()) {
+    msg += "\n   Control inteligente: " + smartNote;
+    msg += "\n   Modo " + modeStr + " | Calienta: <= " + String(SMART_CHEAP_ABS, 2) + " E/kWh, " +
+           String(SMART_CHEAP_HOURS) + " horas mas baratas, antes de las 06:30 si < " +
+           String(SMART_MORNING, 0) + " C, o si el agua < " + String(SMART_MIN, 0) + " C (hasta " +
+           String(SMART_MIN_STOP, 0) + " C)";
+  } else {
+    msg += "\n   Modo " + modeStr + " | Umbral " + String(termo_max_price, 3) + " E/kWh" +
+           (termo_mode == TERMO_AUTO ? " (sin sonda: control por umbral)" : "");
+  }
   float agua = sondaWaterTemp();
   msg += isnan(agua) ? String("\n   Agua: sin sonda conectada")
                      : "\n   Agua: " + String(agua, 1) + " C (sonda)";

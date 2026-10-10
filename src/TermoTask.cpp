@@ -452,8 +452,9 @@ String termoStatusText() {
     msg += "\n   Modo " + modeStr + " | Umbral " + String(termo_max_price, 3) + " E/kWh" +
            (termo_mode == TERMO_AUTO ? " (sin sonda: control por umbral)" : "");
   }
-  float agua = sondaWaterTemp();
+  float agua = sondaWaterTemp(), agua2 = sondaWaterTemp2();
   msg += isnan(agua) ? String("\n   Agua: sin sonda conectada")
-                     : "\n   Agua: " + String(agua, 1) + " C (sonda)";
+                     : "\n   Agua abajo: " + String(agua, 1) + " C (vaina del termostato)";
+  if (!isnan(agua2)) msg += "\n   Agua a media altura: " + String(agua2, 1) + " C (serpentin)";
   return msg;
 }

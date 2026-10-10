@@ -22,6 +22,7 @@ static char probeFw[22] = "";
 static volatile uint8_t probeSensors = 0;
 static volatile float probeRawTemp = NAN;
 static volatile uint8_t probeLine = 0;
+static volatile float lastTemp2 = NAN; // mid height (coil)
 static IPAddress probeIp;
 // A reading older than this is not used (nor shown as current)
 static const unsigned long SONDA_STALE = 300000; // 5 min
@@ -54,6 +55,7 @@ static bool handlePacket(const uint8_t *data, int len, bool viaUdp) {
   probeSensors = p.sensors;
   probeRawTemp = p.rawTemp;
   probeLine = p.line;
+  lastTemp2 = p.temp2;
   probeFw[sizeof(p.fw)] = 0;
   return true;
 }
@@ -122,6 +124,7 @@ static const char *rssiWord(int rssi) {
 static bool fresh() { return rxCount > 0 && millis() - lastRxAt < SONDA_STALE; }
 
 float sondaWaterTemp() { return fresh() ? lastTemp : NAN; }
+float sondaWaterTemp2() { return fresh() ? lastTemp2 : NAN; }
 
 String sondaShortText() {
   if (!started || rxCount == 0) return "📡 Sonda Termo: ningun mensaje recibido";
@@ -130,7 +133,8 @@ String sondaShortText() {
   String msg = "📡 Sonda Termo: ";
   msg += lastMinutePct >= 0 ? String(lastMinutePct, 0) + " % ultimo minuto" : "conectada";
   if (probeRssi != 0) msg += " | WiFi " + String(probeRssi) + " dBm (" + rssiWord(probeRssi) + ")";
-  if (!isnan(lastTemp)) msg += " | Agua " + String(lastTemp, 1) + " C";
+  if (!isnan(lastTemp)) msg += " | Agua abajo " + String(lastTemp, 1) + " C";
+  if (!isnan(lastTemp2)) msg += ", medio " + String(lastTemp2, 1) + " C";
   return msg;
 }
 
@@ -166,7 +170,8 @@ String sondaLinkText() {
     msg += "   WiFi de la sonda: " + String(probeRssi) + " dBm (" + rssiWord(probeRssi) + ")\n";
   }
   msg += "   Sonda encendida " + String(probeUptime / 60) + " min";
-  if (!isnan(lastTemp)) msg += " | Agua " + String(lastTemp, 1) + " C";
+  if (!isnan(lastTemp)) msg += " | Agua abajo " + String(lastTemp, 1) + " C";
+  if (!isnan(lastTemp2)) msg += ", medio " + String(lastTemp2, 1) + " C";
   // DS18B20 on the probe: how many it finds and what it last read
   msg += "\n   DS18B20: " + String(probeSensors) + " encontrada" + (probeSensors == 1 ? "" : "s");
   if (probeSensors == 0) {

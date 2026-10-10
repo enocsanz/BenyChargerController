@@ -12,6 +12,7 @@ String sondaLinkText();    // For Telegram: /sonda, everything
 String sondaShortText();   // one line for /status
 String sondaVersionText(); // probe firmware and IP, for /version
 String sondaWifiText();    // probe WiFi signal, for /wifi
-float sondaWaterTemp();    // water temperature, NAN without a fresh reading
+float sondaWaterTemp();    // water at the bottom (thermostat's well), NAN without a fresh reading
+float sondaWaterTemp2();   // water at mid height (old heating coil), NAN without a fresh reading
 
 #endif

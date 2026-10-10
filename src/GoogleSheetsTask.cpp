@@ -133,6 +133,8 @@ static void takeSample() {
   // Water in the heater (DS18B20 on the probe), empty without a fresh reading
   float wt = sondaWaterTemp();
   s += "," + (isnan(wt) ? String("null") : String(wt, 1));
+  float wt2 = sondaWaterTemp2();
+  s += "," + (isnan(wt2) ? String("null") : String(wt2, 1));
   s += "]";
 
   if (sampleCount == MAX_SAMPLES) {

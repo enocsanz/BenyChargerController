@@ -17,6 +17,7 @@
 #include <esp_task_wdt.h>
 #include <DallasTemperature.h>
 #include <OneWire.h>
+#include <Preferences.h>
 
 // Main controller (StampS3), fixed IP in the router
 static const IPAddress MAIN_IP(192, 168, 86, 41);
@@ -35,8 +36,38 @@ static const int ONEWIRE_PIN = 26;
 static const unsigned long TEMP_INTERVAL = 10000; // a reading every 10 s
 static OneWire oneWire(ONEWIRE_PIN);
 static DallasTemperature ds(&oneWire);
-static float waterTemp = NAN;      // last valid reading
+// Two DS18B20 on the same 1-Wire bus (G26, one 4.7k pull-up for both), told
+// apart by their 64-bit address. The bottom one (thermostat's well) is the
+// first one ever seen: while it is alone on the bus its address is stored in
+// flash, so a second probe added later is known to be the mid-height one
+// (inside the old heating coil).
+static float waterTemp = NAN;      // bottom: last valid reading
 static unsigned long waterAt = 0;  // when it was taken
+static float waterTemp2 = NAN;     // mid height: last valid reading
+static unsigned long water2At = 0;
+static DeviceAddress addrLow;      // bottom probe's address
+static bool haveLow = false;
+
+static void loadLowAddr() {
+  Preferences p;
+  p.begin("sonda", true);
+  if (p.getBytesLength("low") == 8) {
+    p.getBytes("low", addrLow, 8);
+    haveLow = true;
+  }
+  p.end();
+}
+
+static void saveLowAddr(const uint8_t *a) {
+  Preferences p;
+  p.begin("sonda", false);
+  p.putBytes("low", a, 8);
+  p.end();
+  memcpy(addrLow, a, 8);
+  haveLow = true;
+}
+
+static bool validTemp(float t) { return t != DEVICE_DISCONNECTED_C && t != 85.0 && t > -20 && t < 110; }
 static int sensors = 0;
 static float rawTemp = NAN; // last reading as read, for the controller's /sonda
 static uint8_t lineFlags = 0; // SONDA_LINE_* from the last check
@@ -77,13 +108,34 @@ static void readWater() {
   }
   if (millis() - requestedAt < 800) return;
   requested = false;
-  float t = ds.getTempCByIndex(0);
-  rawTemp = t;
-  if (t != DEVICE_DISCONNECTED_C && t != 85.0 && t > -20 && t < 110) {
-    waterTemp = t;
+  float tLow = NAN, tMid = NAN;
+  rawTemp = NAN;
+  for (int i = 0; i < sensors && i < 4; i++) {
+    DeviceAddress a;
+    if (!ds.getAddress(a, i)) continue;
+    if (!haveLow && sensors == 1) saveLowAddr(a); // alone: it is the bottom one
+    float t = ds.getTempC(a);
+    // Without a known bottom address (both fitted at once) the first one is it
+    bool isLow = haveLow ? memcmp(a, addrLow, 8) == 0 : i == 0;
+    if (isLow) {
+      rawTemp = t;
+      if (validTemp(t)) tLow = t;
+    } else if (validTemp(t)) {
+      tMid = t;
+    }
+  }
+  // No valid reading for a minute: do not send a stale one
+  if (!isnan(tLow)) {
+    waterTemp = tLow;
     waterAt = millis();
   } else if (waterAt && millis() - waterAt > 60000) {
-    waterTemp = NAN; // no valid reading for a minute: do not send a stale one
+    waterTemp = NAN;
+  }
+  if (!isnan(tMid)) {
+    waterTemp2 = tMid;
+    water2At = millis();
+  } else if (water2At && millis() - water2At > 60000) {
+    waterTemp2 = NAN;
   }
 }
 static unsigned long lastAckAt = 0; // last echo from the controller
@@ -117,6 +169,7 @@ static void sendOne() {
   p.sensors = sensors;
   p.rawTemp = rawTemp;
   p.line = lineFlags;
+  p.temp2 = waterTemp2;
   udp.beginPacket(MAIN_IP, SONDA_UDP_PORT);
   udp.write((uint8_t *)&p, sizeof(p));
   udp.endPacket();
@@ -163,15 +216,19 @@ static void draw() {
     M5.Lcd.println("SIN WIFI");
     return;
   }
-  // Water temperature, big
-  M5.Lcd.setTextSize(4);
+  // Water temperatures, big: bottom (well) and, if fitted, mid height (coil)
+  M5.Lcd.setTextSize(3);
   if (isnan(waterTemp)) {
     M5.Lcd.setTextColor(RED, BLACK);
     M5.Lcd.setTextSize(2);
     M5.Lcd.println(sensors ? "Sonda sin dato" : "Sin sonda");
   } else {
     M5.Lcd.setTextColor(CYAN, BLACK);
-    M5.Lcd.printf("%.1f C\n", waterTemp);
+    M5.Lcd.printf("Ab %.1fC\n", waterTemp);
+  }
+  if (!isnan(waterTemp2)) {
+    M5.Lcd.setTextColor(ORANGE, BLACK);
+    M5.Lcd.printf("Me %.1fC\n", waterTemp2);
   }
   M5.Lcd.setTextSize(2);
   // WiFi signal: green >= -67, yellow >= -75, red below
@@ -206,6 +263,7 @@ void setup() {
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
+  loadLowAddr();
   ds.begin();
   ds.setWaitForConversion(false); // readWater() collects it later
   pinMode(ONEWIRE_PIN, INPUT_PULLUP);

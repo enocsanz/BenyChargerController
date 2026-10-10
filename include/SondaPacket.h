@@ -16,12 +16,13 @@ struct __attribute__((packed)) SondaPacket {
   uint32_t magic;  // SONDA_MAGIC
   uint32_t seq;    // +1 per message; restarts at 1 when the probe reboots
   uint32_t uptime; // probe uptime (s)
-  float temp;      // water temperature (C); NAN while there is no sensor
+  float temp;      // water at the bottom: thermostat's well (C); NAN without a reading
   int8_t rssi;     // probe's WiFi signal (dBm); 0 over ESP-NOW
   char fw[21];     // probe firmware build, __DATE__ " " __TIME__
   uint8_t sensors; // DS18B20 found on the bus
   float rawTemp;   // last reading as read, valid or not (-127: no answer)
   uint8_t line;    // data line check, see SONDA_LINE_*
+  float temp2;     // water at mid height: old heating coil (C); NAN without a reading
 };
 
 #endif
